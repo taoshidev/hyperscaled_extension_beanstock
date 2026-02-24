@@ -8,6 +8,14 @@
   // ── Supported trading pairs ─────────────────────────────────────────────────
   const SUPPORTED_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA"];
   const UNSUPPORTED_OVERLAY_ID = "hf-unsupported-overlay";
+  const LOW_BALANCE_THRESHOLD = 1000;
+  const LOW_BALANCE_OVERLAY_ID = "hf-low-balance-overlay";
+  const BALANCE_CHECK_INTERVAL = 30000;
+
+  let currentBalance = null;
+  let isLowBalance = false;
+  let balanceVerified = false;
+  let balanceCheckTimer = null;
 
   const ACCOUNT = {
     hlBalance: 1645.67,
@@ -16,7 +24,6 @@
     drawdownCurrent: 2.3,
     drawdownMax: 5,
 
-    // demo exposures
     openSingleUsed: 234.5,
     openTotalUsed: 234.5,
   };
@@ -50,6 +57,7 @@
           <span class="hf-logo">Hyper<b>scaled</b></span>
           <span class="hf-divider"></span>
           <span class="hf-hl-bal">${fmt(ACCOUNT.hlBalance)}</span>
+          <span class="hf-low-badge" id="hf-low-badge" style="display:none">LOW BALANCE</span>
         </div>
 
         <div class="hf-stats">
@@ -118,12 +126,21 @@
 
     startBindingLoop();
     scheduleUpdate();
+    startBalanceChecking();
+
+    // Fail closed: block trading immediately until balance is verified >= $1,000
+    if (!balanceVerified || isLowBalance) {
+      showTradeBlockOverlay(isLowBalance ? "low-balance" : "checking");
+    }
   }
 
   function teardown() {
+    if (isLowBalance || !balanceVerified) return;
     stopBindingLoop();
+    stopBalanceChecking();
     document.getElementById(BANNER_ID)?.remove();
     removeUnsupportedOverlay();
+    removeLowBalanceOverlay();
     removeLayoutFix();
   }
 
@@ -217,6 +234,209 @@
   function removeUnsupportedOverlay() {
     document.getElementById(UNSUPPORTED_OVERLAY_ID)?.remove();
   }
+
+  // ── Balance checking & trade blocking ──────────────────────────────────────
+
+  function getStoredAddress() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(["hlAddress"], (result) => {
+        resolve(result.hlAddress || null);
+      });
+    });
+  }
+
+  function detectAddressFromPage() {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const val = localStorage.getItem(key);
+        if (!val) continue;
+        if (/^0x[a-fA-F0-9]{40}$/.test(val.trim())) return val.trim();
+        try {
+          const json = JSON.stringify(JSON.parse(val));
+          const m = json.match(/0x[a-fA-F0-9]{40}/);
+          if (m) return m[0];
+        } catch {}
+      }
+    } catch {}
+    return null;
+  }
+
+  async function getUserAddress() {
+    const stored = await getStoredAddress();
+    if (stored) return stored;
+    const detected = detectAddressFromPage();
+    if (detected) {
+      chrome.storage.local.set({ hlAddress: detected });
+      return detected;
+    }
+    return null;
+  }
+
+  async function checkBalance() {
+    const address = await getUserAddress();
+    if (!address) {
+      isLowBalance = true;
+      balanceVerified = false;
+      showTradeBlockOverlay("no-address");
+      updateBannerBalance();
+      return;
+    }
+
+    if (!balanceVerified) {
+      showTradeBlockOverlay("checking");
+    }
+
+    try {
+      const result = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: "fetchBalance", address },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (response?.success) resolve(response.data);
+            else reject(new Error(response?.error || "Unknown error"));
+          }
+        );
+      });
+
+      currentBalance = result.accountValue;
+      ACCOUNT.hlBalance = currentBalance;
+      balanceVerified = true;
+
+      const wasLow = isLowBalance;
+      isLowBalance = currentBalance < LOW_BALANCE_THRESHOLD;
+
+      if (isLowBalance) {
+        showTradeBlockOverlay("low-balance");
+        if (!wasLow) {
+          chrome.runtime.sendMessage({
+            action: "lowBalanceWarning",
+            balance: currentBalance,
+          });
+        }
+      } else {
+        removeLowBalanceOverlay();
+      }
+
+      updateBannerBalance();
+      scheduleUpdate();
+    } catch (e) {
+      console.error("[Hyperscaled] Balance check failed:", e);
+      if (!balanceVerified) {
+        isLowBalance = true;
+        showTradeBlockOverlay("error");
+        updateBannerBalance();
+      }
+    }
+  }
+
+  const OVERLAY_CONFIGS = {
+    "checking": {
+      icon: "⏳",
+      title: "Verifying Balance",
+      msg: "Checking your Hyperliquid account balance...",
+    },
+    "no-address": {
+      icon: "🔗",
+      title: "Wallet Not Connected",
+      msg: "Enter your Hyperliquid wallet address in the<br>Hyperscaled extension popup to enable trading.",
+    },
+    "low-balance": {
+      icon: "🚫",
+      title: "Trading Disabled",
+      showAmount: true,
+      msg: `Your Hyperliquid balance is below <b>$THRESHOLD</b>.<br>New trades are blocked to protect your account.<br>Deposit funds to resume trading.`,
+      btn: { text: "Go to Portfolio →", href: "https://app.hyperliquid.xyz/portfolio" },
+    },
+    "error": {
+      icon: "⚠️",
+      title: "Balance Check Failed",
+      msg: "Could not verify your account balance.<br>Trading is blocked until balance is confirmed.",
+      btn: { text: "Retry", action: "retry" },
+    },
+  };
+
+  function showTradeBlockOverlay(reason) {
+    const existing = document.getElementById(LOW_BALANCE_OVERLAY_ID);
+    if (existing && existing.dataset.reason === reason) return;
+    if (existing) existing.remove();
+
+    const cfg = OVERLAY_CONFIGS[reason];
+    if (!cfg) return;
+
+    const msgHTML = cfg.msg.replace("$THRESHOLD", fmt(LOW_BALANCE_THRESHOLD));
+
+    const overlay = document.createElement("div");
+    overlay.id = LOW_BALANCE_OVERLAY_ID;
+    overlay.dataset.reason = reason;
+    overlay.innerHTML = `
+      <div class="hf-low-balance-card">
+        <span class="hf-low-balance-icon">${cfg.icon}</span>
+        <span class="hf-low-balance-title">${cfg.title}</span>
+        ${cfg.showAmount && currentBalance !== null ? `<span class="hf-low-balance-amount">${fmt(currentBalance)}</span>` : ""}
+        <span class="hf-low-balance-msg">${msgHTML}</span>
+        ${cfg.btn ? `<a class="hf-low-balance-btn" id="hf-low-balance-link">${cfg.btn.text}</a>` : ""}
+      </div>
+    `;
+    (document.body || document.documentElement).appendChild(overlay);
+
+    const link = overlay.querySelector("#hf-low-balance-link");
+    if (link && cfg.btn) {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (cfg.btn.href) window.location.href = cfg.btn.href;
+        else if (cfg.btn.action === "retry") checkBalance();
+      });
+    }
+  }
+
+  function removeLowBalanceOverlay() {
+    document.getElementById(LOW_BALANCE_OVERLAY_ID)?.remove();
+  }
+
+  function updateBannerBalance() {
+    const balEl = document.querySelector("#hf-banner .hf-hl-bal");
+    const badge = document.getElementById("hf-low-badge");
+    const closeBtn = document.getElementById("hf-close");
+    const blocked = isLowBalance || !balanceVerified;
+
+    if (balEl && currentBalance !== null) {
+      balEl.textContent = fmt(currentBalance);
+      balEl.style.setProperty(
+        "color",
+        isLowBalance ? "#ef4444" : "rgba(255,255,255,0.55)",
+        "important"
+      );
+    }
+    if (badge) {
+      badge.style.setProperty("display", isLowBalance ? "inline-flex" : "none", "important");
+    }
+    if (closeBtn) {
+      closeBtn.style.setProperty("display", blocked ? "none" : "flex", "important");
+    }
+  }
+
+  function startBalanceChecking() {
+    checkBalance();
+    if (balanceCheckTimer) clearInterval(balanceCheckTimer);
+    balanceCheckTimer = setInterval(checkBalance, BALANCE_CHECK_INTERVAL);
+  }
+
+  function stopBalanceChecking() {
+    if (balanceCheckTimer) {
+      clearInterval(balanceCheckTimer);
+      balanceCheckTimer = null;
+    }
+  }
+
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local" && changes.hlAddress) {
+      checkBalance();
+    }
+  });
 
   function checkPairSupport() {
     const symbol = getCurrentSymbol();
@@ -436,23 +656,51 @@
     checkPairSupport();
   }
 
+  // ── SPA navigation detection ────────────────────────────────────────────────
+  // Monkey-patch pushState/replaceState so we catch client-side navigations
+  // the instant they happen, rather than waiting for the next poll tick.
+  function onNavChange() {
+    setTimeout(() => {
+      mountWhenReady();
+      scheduleUpdate();
+      checkPairSupport();
+    }, 0);
+    // Second pass after the SPA has finished rendering
+    setTimeout(() => {
+      mountWhenReady();
+      scheduleUpdate();
+      checkPairSupport();
+    }, 600);
+  }
+
+  const origPushState = history.pushState.bind(history);
+  const origReplaceState = history.replaceState.bind(history);
+
+  history.pushState = function (...args) {
+    origPushState(...args);
+    onNavChange();
+  };
+  history.replaceState = function (...args) {
+    origReplaceState(...args);
+    onNavChange();
+  };
+  window.addEventListener("popstate", onNavChange);
+
+  // Polling fallback for any edge cases the patches miss
   setInterval(mountWhenReady, 1000);
 
   let lastUrl = location.href;
   setInterval(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      setTimeout(() => {
-        mountWhenReady();
-        scheduleUpdate();
-        checkPairSupport();
-      }, 600);
+      onNavChange();
     }
   }, 500);
 
+  // Initial mount
   setTimeout(() => {
     mountWhenReady();
     scheduleUpdate();
     checkPairSupport();
-  }, 1200);
+  }, 300);
 })();

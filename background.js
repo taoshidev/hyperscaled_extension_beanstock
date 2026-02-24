@@ -1,19 +1,74 @@
 // Background service worker for Hyperfunded extension
 
+const LOW_BALANCE_THRESHOLD = 1000;
+
 // Listen for extension icon clicks
 chrome.action.onClicked.addListener((tab) => {
-  // This won't fire when popup is set, but keeping for reference
   showPositionNotification();
 });
 
-// Listen for messages from popup
+// Listen for messages from popup and content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'showPositionNotification') {
     showPositionNotification();
     sendResponse({ success: true });
-    return true; // Required for async response
+    return true;
+  }
+
+  if (request.action === 'fetchBalance') {
+    fetchHLBalance(request.address)
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === 'lowBalanceWarning') {
+    showLowBalanceNotification(request.balance);
+    sendResponse({ success: true });
+    return true;
   }
 });
+
+// Fetch account state from Hyperliquid API
+async function fetchHLBalance(address) {
+  const res = await fetch('https://api.hyperliquid.xyz/info', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'clearinghouseState', user: address })
+  });
+
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+
+  const data = await res.json();
+  const accountValue = parseFloat(data?.marginSummary?.accountValue);
+  if (isNaN(accountValue)) throw new Error('Invalid account data');
+
+  return {
+    accountValue,
+    totalMarginUsed: parseFloat(data?.marginSummary?.totalMarginUsed) || 0,
+    totalNtlPos: parseFloat(data?.marginSummary?.totalNtlPos) || 0,
+  };
+}
+
+// Show a Chrome notification when balance drops below threshold
+function showLowBalanceNotification(balance) {
+  const formatted = '$' + Number(balance).toLocaleString('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  });
+
+  chrome.notifications.create('hyperfunded-low-balance', {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title: '⚠️ Low Balance — Trading Disabled',
+    message: `Your Hyperliquid balance is ${formatted}, below the $1,000 minimum. New trades are blocked until you deposit more funds.`,
+    priority: 2,
+    requireInteraction: true
+  }, (id) => {
+    if (chrome.runtime.lastError) {
+      console.error('Notification error:', chrome.runtime.lastError);
+    }
+  });
+}
 
 // Function to show position notification
 function showPositionNotification() {

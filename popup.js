@@ -1,7 +1,66 @@
-// Simulate real-time data updates
+const LOW_BALANCE_THRESHOLD = 1000;
+let storedAddress = null;
+
+function fmtUsd(n) {
+    return '$' + Number(n).toLocaleString('en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+}
+
+// Fetch balance from background and update UI
+async function refreshBalance() {
+    if (!storedAddress) return;
+    try {
+        const response = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(
+                { action: 'fetchBalance', address: storedAddress },
+                (res) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                        return;
+                    }
+                    if (res?.success) resolve(res.data);
+                    else reject(new Error(res?.error || 'Unknown error'));
+                }
+            );
+        });
+
+        const balance = response.accountValue;
+        const hlValueEl = document.querySelector('.balance-card:not(.balance-card--primary) .balance-value');
+        if (hlValueEl) hlValueEl.textContent = fmtUsd(balance);
+
+        const warningEl = document.getElementById('lowBalanceWarning');
+        const detailEl = document.getElementById('lowBalanceDetail');
+
+        if (balance < LOW_BALANCE_THRESHOLD) {
+            if (warningEl) warningEl.style.display = 'flex';
+            if (detailEl) detailEl.textContent = `Balance: ${fmtUsd(balance)} — minimum $1,000 required`;
+        } else {
+            if (warningEl) warningEl.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Balance fetch failed:', e);
+    }
+}
+
+// Load saved address from storage
+async function loadAddress() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['hlAddress'], (result) => {
+            resolve(result.hlAddress || null);
+        });
+    });
+}
+
+// Save address to storage
+async function saveAddress(address) {
+    return new Promise((resolve) => {
+        chrome.storage.local.set({ hlAddress: address }, resolve);
+    });
+}
+
 function updateData() {
-    // In a real implementation, this would fetch data from an API
-    console.log('Data updated');
+    refreshBalance();
 }
 
 // Function to update status message
@@ -162,26 +221,53 @@ function tryWebNotification(position) {
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Hyperfunded extension loaded');
     updateStatus('Loading...', 'info');
-    
-    // Check permissions first
-    await checkNotificationPermission();
-    
-    // Show notification when extension opens (auto-trigger)
-    setTimeout(() => {
-        console.log('Auto-triggering notification...');
-        showPositionNotification();
-    }, 1000); // Increased delay to allow permission check
-    
-    // Test notification button
-    const testBtn = document.getElementById('testNotification');
-    if (testBtn) {
-        testBtn.addEventListener('click', function() {
-            console.log('Test notification button clicked');
-            showPositionNotification();
+
+    // ── Wallet config ──────────────────────────────────────
+    const addressInput = document.getElementById('walletAddress');
+    const saveBtn = document.getElementById('walletSave');
+    const walletStatus = document.getElementById('walletStatus');
+
+    storedAddress = await loadAddress();
+    if (storedAddress && addressInput) {
+        addressInput.value = storedAddress;
+        if (walletStatus) {
+            walletStatus.textContent = 'Connected';
+            walletStatus.className = 'wallet-status wallet-status--ok';
+        }
+    }
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const val = (addressInput?.value || '').trim();
+            if (!/^0x[a-fA-F0-9]{40}$/.test(val)) {
+                if (walletStatus) {
+                    walletStatus.textContent = 'Invalid address';
+                    walletStatus.className = 'wallet-status wallet-status--err';
+                }
+                return;
+            }
+            await saveAddress(val);
+            storedAddress = val;
+            if (walletStatus) {
+                walletStatus.textContent = 'Saved';
+                walletStatus.className = 'wallet-status wallet-status--ok';
+            }
+            refreshBalance();
         });
     }
-    
-    // Add click handlers for links
+
+    // ── Permissions & notifications ────────────────────────
+    await checkNotificationPermission();
+
+    setTimeout(() => {
+        showPositionNotification();
+    }, 1000);
+
+    const testBtn = document.getElementById('testNotification');
+    if (testBtn) {
+        testBtn.addEventListener('click', () => showPositionNotification());
+    }
+
     const analyticsLink = document.querySelector('.analytics-link');
     if (analyticsLink) {
         analyticsLink.addEventListener('click', function(e) {
@@ -189,7 +275,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             chrome.tabs.create({ url: 'https://vanta.network/dashboard' });
         });
     }
-    
+
     const viewLink = document.querySelector('.view-link');
     if (viewLink) {
         viewLink.addEventListener('click', function(e) {
@@ -197,8 +283,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             chrome.tabs.create({ url: 'https://app.hyperliquid.xyz' });
         });
     }
-    
-    // Update data every 10 seconds
+
+    // ── Periodic balance refresh ───────────────────────────
+    refreshBalance();
     setInterval(updateData, 10000);
 });
 

@@ -22,6 +22,27 @@
             <div class="status-badge">In Challenge</div>
         </div>
 
+        <!-- Wallet Config -->
+        <div id="walletConfig" class="wallet-config">
+            <div class="wallet-config-header">
+                <span class="wallet-config-label">Wallet Address</span>
+                <span id="walletStatus" class="wallet-status"></span>
+            </div>
+            <div class="wallet-input-row">
+                <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input" spellcheck="false" />
+                <button id="walletSave" class="wallet-save-btn">Save</button>
+            </div>
+        </div>
+
+        <!-- Low Balance Warning -->
+        <div id="lowBalanceWarning" class="low-balance-warning" style="display: none;">
+            <div class="low-balance-warning-icon">⚠️</div>
+            <div class="low-balance-warning-body">
+                <div class="low-balance-warning-title">Low Balance — Trading Disabled</div>
+                <div id="lowBalanceDetail" class="low-balance-warning-detail">Balance below $1,000</div>
+            </div>
+        </div>
+
         <!-- Account Balances -->
         <div class="balance-grid">
             <div class="balance-card balance-card--primary">
