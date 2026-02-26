@@ -47,12 +47,12 @@
         <div class="balance-grid">
             <div class="balance-card balance-card--primary">
                 <div class="balance-label">Funded Account</div>
-                <div class="balance-value">$106,456.78</div>
-                <div class="balance-change positive">+$6,456.78 (6.45%)</div>
+                <div class="balance-value"><span id="fundedBalance">--</span></div>
+                <div class="balance-change positive"><span id="fundedChange">--</span></div>
             </div>
             <div class="balance-card">
                 <div class="balance-label">HL Account</div>
-                <div class="balance-value balance-value--sm">$1,645.67</div>
+                <div class="balance-value balance-value--sm"><span id="hlBalance">--</span></div>
                 <div class="balance-change neutral">Live equity</div>
             </div>
         </div>
@@ -64,17 +64,16 @@
                 <span class="capacity-rule">62.5% / 125% limits</span>
             </div>
             <div class="capacity-rows">
-                <!-- Total positions row -->
                 <div class="capacity-row">
                     <div class="capacity-row-top">
                         <span class="capacity-label">Total across all positions</span>
-                        <span class="capacity-used">$234.50 <span class="capacity-of">of</span> $2,057.09</span>
+                        <span class="capacity-used"><span id="capacityUsed">--</span> <span class="capacity-of">of</span> <span id="capacityMax">--</span></span>
                     </div>
                     <div class="capacity-bar-wrap">
                         <div class="capacity-bar">
-                            <div class="capacity-fill capacity-fill--total" style="width: 11.4%;"></div>
+                            <div class="capacity-fill capacity-fill--total" id="capacityFill" style="width: 0%;"></div>
                         </div>
-                        <span class="capacity-remaining">$1,822.59 left</span>
+                        <span class="capacity-remaining"><span id="capacityRemaining">--</span> left</span>
                     </div>
                 </div>
             </div>
@@ -84,24 +83,24 @@
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Challenge Progress</div>
-                <div class="section-value">6.45% / 10%</div>
+                <div class="section-value"><span id="challengeValue">--</span></div>
             </div>
             <div class="progress-bar">
-                <div class="progress-fill" style="width: 61.25%;"></div>
+                <div class="progress-fill" id="challengeFill" style="width: 0%;"></div>
             </div>
-            <div class="progress-label">$3,543 to target ($10,000 goal)</div>
+            <div class="progress-label"><span id="challengeLabel">--</span></div>
         </div>
 
         <!-- Max Drawdown -->
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Current Drawdown</div>
-                <div class="section-value drawdown">2.3% / 5%</div>
+                <div class="section-value drawdown"><span id="drawdownValue">--</span></div>
             </div>
             <div class="progress-bar drawdown-bar">
-                <div class="progress-fill drawdown-fill" style="width: 46%;"></div>
+                <div class="progress-fill drawdown-fill" id="drawdownFill" style="width: 0%;"></div>
             </div>
-            <div class="progress-label">$2,700 remaining buffer</div>
+            <div class="progress-label"><span id="drawdownLabel">--</span></div>
         </div>
 
         <!-- Open Positions -->
@@ -110,37 +109,9 @@
                 <div class="section-title">Open Hyperscaled Positions</div>
                 <a href="#" class="view-link">View on HL →</a>
             </div>
-            
-            <div class="position-card">
-                <div class="position-header">
-                    <div class="position-symbol">
-                        <span class="symbol-name">BTC-PERP</span>
-                        <span class="position-badge long">LONG</span>
-                    </div>
-                    <div class="position-pnl positive">+$234.50</div>
-                </div>
-                
-                <div class="position-details">
-                    <div class="detail-row">
-                        <span class="detail-label">Size</span>
-                        <span class="detail-value">0.15 BTC</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Entry</span>
-                        <span class="detail-value">$98,450.00</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Mark</span>
-                        <span class="detail-value">$100,013.33</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Leverage</span>
-                        <span class="detail-value">5x</span>
-                    </div>
-                </div>
+            <div id="positionsContainer">
+                <div class="no-more-positions">Loading positions...</div>
             </div>
-
-            <div class="no-more-positions">No additional open positions</div>
         </div>
 
         <!-- Analytics Link -->

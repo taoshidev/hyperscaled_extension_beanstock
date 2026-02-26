@@ -22,12 +22,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'fetchValidatorData') {
+    fetchValidatorData(request.address)
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === 'lowBalanceWarning') {
     showLowBalanceNotification(request.balance);
     sendResponse({ success: true });
     return true;
   }
 });
+
+// Fetch trader data from validator endpoint
+async function fetchValidatorData(address) {
+  const res = await fetch(`http://localhost:48888/hl-traders/${address}`);
+  if (!res.ok) throw new Error(`Validator API error ${res.status}`);
+  return res.json();
+}
 
 // Fetch account state from Hyperliquid API
 async function fetchHLBalance(address) {

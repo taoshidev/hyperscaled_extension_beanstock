@@ -7,6 +7,9 @@ function fmtUsd(n) {
     });
 }
 
+const CHALLENGE_TARGET = 10;
+const DRAWDOWN_MAX = 5;
+
 // Fetch balance from background and update UI
 async function refreshBalance() {
     if (!storedAddress) return;
@@ -26,8 +29,8 @@ async function refreshBalance() {
         });
 
         const balance = response.accountValue;
-        const hlValueEl = document.querySelector('.balance-card:not(.balance-card--primary) .balance-value');
-        if (hlValueEl) hlValueEl.textContent = fmtUsd(balance);
+        const hlBalanceEl = document.getElementById('hlBalance');
+        if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(balance);
 
         const warningEl = document.getElementById('lowBalanceWarning');
         const detailEl = document.getElementById('lowBalanceDetail');
@@ -41,6 +44,180 @@ async function refreshBalance() {
     } catch (e) {
         console.error('Balance fetch failed:', e);
     }
+}
+
+// Fetch validator data and update all dynamic UI elements
+async function refreshValidatorData() {
+    if (!storedAddress) return;
+    try {
+        const result = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(
+                { action: 'fetchValidatorData', address: storedAddress },
+                (res) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                        return;
+                    }
+                    if (res?.success) resolve(res.data);
+                    else reject(new Error(res?.error || 'Unknown error'));
+                }
+            );
+        });
+
+        if (result.status !== 'success') return;
+
+        const accountSize = result.account_size || 0;
+        const positions = result.positions || [];
+
+        // Compute PnL from positions
+        let totalUnrealizedPnl = 0;
+        let totalNotional = 0;
+        let maxSingleNotional = 0;
+
+        for (const pos of positions) {
+            const unrealizedPnl = parseFloat(pos.unrealized_pnl) || 0;
+            const notional = Math.abs(parseFloat(pos.position_value || pos.notional || 0));
+            totalUnrealizedPnl += unrealizedPnl;
+            totalNotional += notional;
+            if (notional > maxSingleNotional) maxSingleNotional = notional;
+        }
+
+        const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
+        const drawdownCurrent = result.drawdown ? (parseFloat(result.drawdown.ledger_max_drawdown) || 0) : 0;
+
+        // Funded balance
+        const fundedBalanceEl = document.getElementById('fundedBalance');
+        if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(accountSize);
+
+        // Funded change
+        const fundedChangeEl = document.getElementById('fundedChange');
+        if (fundedChangeEl) {
+            const sign = totalUnrealizedPnl >= 0 ? '+' : '';
+            fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${sign}${pnlPct.toFixed(2)}%)`;
+            const changeParent = fundedChangeEl.closest('.balance-change');
+            if (changeParent) {
+                changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
+            }
+        }
+
+        // Challenge progress
+        const challengeValueEl = document.getElementById('challengeValue');
+        const challengeFillEl = document.getElementById('challengeFill');
+        const challengeLabelEl = document.getElementById('challengeLabel');
+        if (challengeValueEl) challengeValueEl.textContent = `${pnlPct.toFixed(2)}% / ${CHALLENGE_TARGET}%`;
+        if (challengeFillEl) {
+            const challengeFillPct = Math.min((Math.max(pnlPct, 0) / CHALLENGE_TARGET) * 100, 100);
+            challengeFillEl.style.width = challengeFillPct + '%';
+        }
+        if (challengeLabelEl) {
+            const targetDollar = accountSize * (CHALLENGE_TARGET / 100);
+            const remainingDollar = targetDollar - totalUnrealizedPnl;
+            challengeLabelEl.textContent = remainingDollar > 0
+                ? `${fmtUsd(remainingDollar)} to target (${fmtUsd(targetDollar)} goal)`
+                : 'Target reached!';
+        }
+
+        // Drawdown
+        const drawdownValueEl = document.getElementById('drawdownValue');
+        const drawdownFillEl = document.getElementById('drawdownFill');
+        const drawdownLabelEl = document.getElementById('drawdownLabel');
+        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownCurrent.toFixed(1)}% / ${DRAWDOWN_MAX}%`;
+        if (drawdownFillEl) {
+            const drawdownFillPct = Math.min((drawdownCurrent / DRAWDOWN_MAX) * 100, 100);
+            drawdownFillEl.style.width = drawdownFillPct + '%';
+        }
+        if (drawdownLabelEl) {
+            const bufferDollar = accountSize * ((DRAWDOWN_MAX - drawdownCurrent) / 100);
+            drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer`;
+        }
+
+        // Capacity
+        const maxTotal = accountSize * 1.25;
+        const capacityUsedEl = document.getElementById('capacityUsed');
+        const capacityMaxEl = document.getElementById('capacityMax');
+        const capacityFillEl = document.getElementById('capacityFill');
+        const capacityRemainingEl = document.getElementById('capacityRemaining');
+        if (capacityUsedEl) capacityUsedEl.textContent = fmtUsd(totalNotional);
+        if (capacityMaxEl) capacityMaxEl.textContent = fmtUsd(maxTotal);
+        if (capacityFillEl) {
+            const capPct = maxTotal > 0 ? Math.min((totalNotional / maxTotal) * 100, 100) : 0;
+            capacityFillEl.style.width = capPct + '%';
+        }
+        if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalNotional, 0));
+
+        // Positions
+        renderPositions(positions);
+
+    } catch (e) {
+        console.error('Validator data fetch failed:', e);
+        setPlaceholders();
+    }
+}
+
+function setPlaceholders() {
+    const ids = ['fundedBalance', 'fundedChange', 'challengeValue', 'challengeLabel',
+                 'drawdownValue', 'drawdownLabel', 'capacityUsed', 'capacityMax', 'capacityRemaining'];
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '--';
+    }
+    const container = document.getElementById('positionsContainer');
+    if (container) container.innerHTML = '<div class="no-more-positions">Data unavailable</div>';
+}
+
+function renderPositions(positions) {
+    const container = document.getElementById('positionsContainer');
+    if (!container) return;
+
+    if (!positions || positions.length === 0) {
+        container.innerHTML = '<div class="no-more-positions">No open positions</div>';
+        return;
+    }
+
+    container.innerHTML = positions.map(pos => {
+        const symbol = pos.coin || pos.symbol || 'UNKNOWN';
+        const szi = parseFloat(pos.szi || pos.size || 0);
+        const isLong = szi > 0;
+        const direction = isLong ? 'LONG' : 'SHORT';
+        const badgeClass = isLong ? 'long' : 'short';
+        const absSize = Math.abs(szi);
+        const entryPx = parseFloat(pos.entry_px || pos.entry_price || 0);
+        const markPx = parseFloat(pos.mark_px || pos.mark_price || 0);
+        const leverage = pos.leverage ? `${parseFloat(pos.leverage.value || pos.leverage)}x` : '--';
+        const pnl = parseFloat(pos.unrealized_pnl) || 0;
+        const pnlSign = pnl >= 0 ? '+' : '';
+        const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+
+        return `
+            <div class="position-card">
+                <div class="position-header">
+                    <div class="position-symbol">
+                        <span class="symbol-name">${symbol}-PERP</span>
+                        <span class="position-badge ${badgeClass}">${direction}</span>
+                    </div>
+                    <div class="position-pnl ${pnlClass}">${pnlSign}${fmtUsd(pnl)}</div>
+                </div>
+                <div class="position-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Size</span>
+                        <span class="detail-value">${absSize} ${symbol}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Entry</span>
+                        <span class="detail-value">${fmtUsd(entryPx)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Mark</span>
+                        <span class="detail-value">${fmtUsd(markPx)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Leverage</span>
+                        <span class="detail-value">${leverage}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // Load saved address from storage
@@ -61,6 +238,7 @@ async function saveAddress(address) {
 
 function updateData() {
     refreshBalance();
+    refreshValidatorData();
 }
 
 // Function to update status message
@@ -253,6 +431,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 walletStatus.className = 'wallet-status wallet-status--ok';
             }
             refreshBalance();
+            refreshValidatorData();
         });
     }
 
@@ -284,8 +463,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
-    // ── Periodic balance refresh ───────────────────────────
+    // ── Periodic data refresh ───────────────────────────────
     refreshBalance();
+    refreshValidatorData();
     setInterval(updateData, 10000);
 });
 

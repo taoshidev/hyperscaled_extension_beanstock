@@ -22,7 +22,8 @@
   ],
   "host_permissions": [
     "https://app.hyperliquid.xyz/trade/*",
-    "https://api.hyperliquid.xyz/*"
+    "https://api.hyperliquid.xyz/*",
+    "http://localhost:48888/*"
   ],
   "content_scripts": [
     {

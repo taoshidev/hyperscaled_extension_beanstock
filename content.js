@@ -18,15 +18,17 @@
   let balanceCheckTimer = null;
 
   const ACCOUNT = {
-    hlBalance: 1645.67,
+    hlBalance: 0,
+    fundedSize: 0,
     challengeTarget: 10,
-    challengeCurrent: 6.45,
-    drawdownCurrent: 2.3,
+    challengeCurrent: 0,
+    drawdownCurrent: 0,
     drawdownMax: 5,
-
-    openSingleUsed: 234.5,
-    openTotalUsed: 234.5,
+    openSingleUsed: 0,
+    openTotalUsed: 0,
   };
+
+  let validatorDataLoaded = false;
 
   const BANNER_ID = "hf-banner";
   const LAYOUT_STYLE_ID = "hf-layout-fix";
@@ -273,6 +275,71 @@
     return null;
   }
 
+  async function fetchValidatorData() {
+    const address = await getUserAddress();
+    if (!address) return;
+
+    try {
+      const result = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: "fetchValidatorData", address },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (response?.success) resolve(response.data);
+            else reject(new Error(response?.error || "Unknown error"));
+          }
+        );
+      });
+
+      if (result.status !== "success") return;
+
+      ACCOUNT.fundedSize = result.account_size || 0;
+
+      // Compute PnL % from positions
+      const positions = result.positions || [];
+      let totalUnrealizedPnl = 0;
+      let totalNotional = 0;
+      let maxSingleNotional = 0;
+
+      for (const pos of positions) {
+        const unrealizedPnl = parseFloat(pos.unrealized_pnl) || 0;
+        const notional = Math.abs(parseFloat(pos.position_value || pos.notional || 0));
+        totalUnrealizedPnl += unrealizedPnl;
+        totalNotional += notional;
+        if (notional > maxSingleNotional) maxSingleNotional = notional;
+      }
+
+      if (ACCOUNT.fundedSize > 0) {
+        ACCOUNT.challengeCurrent = parseFloat(((totalUnrealizedPnl / ACCOUNT.fundedSize) * 100).toFixed(2));
+      }
+
+      // Drawdown from response
+      if (result.drawdown) {
+        ACCOUNT.drawdownCurrent = parseFloat(result.drawdown.ledger_max_drawdown) || 0;
+      }
+
+      ACCOUNT.openTotalUsed = totalNotional;
+      ACCOUNT.openSingleUsed = maxSingleNotional;
+
+      validatorDataLoaded = true;
+      updateBannerFromValidator();
+    } catch (e) {
+      console.error("[Hyperscaled] Validator fetch failed:", e);
+    }
+  }
+
+  function updateBannerFromValidator() {
+    const banner = document.getElementById(BANNER_ID);
+    if (!banner) return;
+    banner.innerHTML = getBannerHTML();
+    banner.querySelector("#hf-close")?.addEventListener("click", teardown);
+    updateBannerBalance();
+    updateBanner(getPendingNotional());
+  }
+
   async function checkBalance() {
     const address = await getUserAddress();
     if (!address) {
@@ -421,8 +488,12 @@
 
   function startBalanceChecking() {
     checkBalance();
+    fetchValidatorData();
     if (balanceCheckTimer) clearInterval(balanceCheckTimer);
-    balanceCheckTimer = setInterval(checkBalance, BALANCE_CHECK_INTERVAL);
+    balanceCheckTimer = setInterval(() => {
+      checkBalance();
+      fetchValidatorData();
+    }, BALANCE_CHECK_INTERVAL);
   }
 
   function stopBalanceChecking() {
@@ -435,6 +506,7 @@
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === "local" && changes.hlAddress) {
       checkBalance();
+      fetchValidatorData();
     }
   });
 
