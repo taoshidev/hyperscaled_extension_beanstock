@@ -6,31 +6,42 @@
     <title>Hyperscaled</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="popup.css">
+    <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
 </head>
 <body>
-    <div class="liquid-bg">
-        <div class="liquid-gradient"></div>
-        <div class="liquid-gradient"></div>
-        <div class="liquid-gradient"></div>
-    </div>
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <div class="logo">Hyper<b>scaled</b></div>
+            <div class="header-left">
+                <div class="logo">Hyper<b>scaled</b></div>
+            </div>
             <div class="status-badge">In Challenge</div>
         </div>
 
         <!-- Wallet Config -->
         <div id="walletConfig" class="wallet-config">
-            <div class="wallet-config-header">
-                <span class="wallet-config-label">Wallet Address</span>
-                <span id="walletStatus" class="wallet-status"></span>
+            <!-- Collapsed: shown when address is saved -->
+            <div id="walletCollapsed" class="wallet-collapsed" style="display: none;">
+                <span id="walletAddressDisplay" class="wallet-address-display">0x...0000</span>
+                <span class="wallet-connected-mark">✓</span>
+                <button id="walletEdit" class="wallet-edit-btn" title="Edit address">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M8.5 1.5L10.5 3.5L4 10H2V8L8.5 1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
             </div>
-            <div class="wallet-input-row">
-                <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input" spellcheck="false" />
-                <button id="walletSave" class="wallet-save-btn">Save</button>
+            <!-- Expanded: full form -->
+            <div id="walletExpanded" class="wallet-expanded">
+                <div class="wallet-config-header">
+                    <span class="wallet-config-label">Wallet Address</span>
+                    <span id="walletStatus" class="wallet-status"></span>
+                </div>
+                <div class="wallet-input-row">
+                    <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input" spellcheck="false" />
+                    <button id="walletSave" class="wallet-save-btn">Save</button>
+                </div>
             </div>
         </div>
 
@@ -64,7 +75,6 @@
                 <span class="capacity-rule">62.5% / 125% limits</span>
             </div>
             <div class="capacity-rows">
-                <!-- Total positions row -->
                 <div class="capacity-row">
                     <div class="capacity-row-top">
                         <span class="capacity-label">Total across all positions</span>
@@ -106,11 +116,11 @@
 
         <!-- Open Positions -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-title">Open Hyperscaled Positions</div>
-                <a href="#" class="view-link">View on HL →</a>
+            <div class="section-header section-header--positions">
+                <div class="section-title section-title--uppercase">Open Hyperscaled Positions</div>
+                <a href="#" class="view-link view-link--muted">View on HL →</a>
             </div>
-            
+
             <div class="position-card">
                 <div class="position-header">
                     <div class="position-symbol">
@@ -119,23 +129,19 @@
                     </div>
                     <div class="position-pnl positive">+$234.50</div>
                 </div>
-                
+
                 <div class="position-details">
-                    <div class="detail-row">
+                    <div class="detail-col detail-col--left">
                         <span class="detail-label">Size</span>
                         <span class="detail-value">0.15 BTC</span>
                     </div>
-                    <div class="detail-row">
+                    <div class="detail-col detail-col--center">
                         <span class="detail-label">Entry</span>
-                        <span class="detail-value">$98,450.00</span>
+                        <span class="detail-value">$98,450</span>
                     </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Mark</span>
-                        <span class="detail-value">$100,013.33</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Leverage</span>
-                        <span class="detail-value">5x</span>
+                    <div class="detail-col detail-col--right">
+                        <span class="detail-label">Mark · Lev</span>
+                        <span class="detail-value">$100,013 · 5×</span>
                     </div>
                 </div>
             </div>

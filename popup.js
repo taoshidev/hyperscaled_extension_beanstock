@@ -63,6 +63,32 @@ function updateData() {
     refreshBalance();
 }
 
+// Truncate wallet address for collapsed display: 0x1234...abcd
+function truncateAddress(address) {
+    if (!address || address.length < 10) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function showWalletCollapsed(address) {
+    const collapsed = document.getElementById('walletCollapsed');
+    const expanded = document.getElementById('walletExpanded');
+    const display = document.getElementById('walletAddressDisplay');
+    if (!collapsed || !expanded) return;
+    if (display) display.textContent = truncateAddress(address);
+    collapsed.style.display = 'flex';
+    expanded.style.display = 'none';
+}
+
+function showWalletExpanded() {
+    const collapsed = document.getElementById('walletCollapsed');
+    const expanded = document.getElementById('walletExpanded');
+    const addressInput = document.getElementById('walletAddress');
+    if (!collapsed || !expanded) return;
+    collapsed.style.display = 'none';
+    expanded.style.display = '';
+    if (addressInput) { addressInput.focus(); addressInput.select(); }
+}
+
 // Function to update status message
 function updateStatus(message, type = 'info') {
     const statusDiv = document.getElementById('notificationStatus');
@@ -226,14 +252,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     const addressInput = document.getElementById('walletAddress');
     const saveBtn = document.getElementById('walletSave');
     const walletStatus = document.getElementById('walletStatus');
+    const editBtn = document.getElementById('walletEdit');
 
     storedAddress = await loadAddress();
-    if (storedAddress && addressInput) {
-        addressInput.value = storedAddress;
-        if (walletStatus) {
-            walletStatus.textContent = 'Connected';
-            walletStatus.className = 'wallet-status wallet-status--ok';
-        }
+    if (storedAddress) {
+        if (addressInput) addressInput.value = storedAddress;
+        showWalletCollapsed(storedAddress);
+    }
+
+    if (editBtn) {
+        editBtn.addEventListener('click', showWalletExpanded);
     }
 
     if (saveBtn) {
@@ -248,10 +276,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
             await saveAddress(val);
             storedAddress = val;
-            if (walletStatus) {
-                walletStatus.textContent = 'Saved';
-                walletStatus.className = 'wallet-status wallet-status--ok';
-            }
+            showWalletCollapsed(val);
             refreshBalance();
         });
     }
