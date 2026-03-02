@@ -128,10 +128,10 @@ body {
     border-bottom: 1px solid var(--border-card);
 }
 
-.header-left {
+.header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .logo {
@@ -238,43 +238,32 @@ body {
     color: var(--text-primary);
 }
 
-/* Collapsed wallet indicator */
-.wallet-collapsed {
+/* Inline wallet indicator (lives in header when address is saved) */
+.wallet-inline {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
 }
 
-.wallet-address-display {
-    flex: 1;
-    min-width: 0;
+.wallet-inline-address {
     font-size: 11px;
     font-family: var(--font-mono);
-    color: var(--text-body);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: var(--text-dim);
+    letter-spacing: 0.01em;
 }
 
-.wallet-connected-mark {
-    font-size: 11px;
-    color: var(--text-subtle);
-    flex-shrink: 0;
-}
-
-.wallet-edit-btn {
-    background: transparent;
+.wallet-inline-edit {
+    background: none;
     border: none;
-    padding: 2px;
+    padding: 0;
+    font-size: 11px;
+    font-family: var(--font-ui);
     color: var(--text-ghost);
     cursor: pointer;
-    display: flex;
-    align-items: center;
     transition: color 0.15s ease;
-    flex-shrink: 0;
 }
 
-.wallet-edit-btn:hover {
+.wallet-inline-edit:hover {
     color: var(--text-subtle);
 }
 
@@ -321,31 +310,39 @@ body {
 }
 
 .balance-card {
-    padding: 16px;
-    background: var(--card-bg-subtle);
-    border: 1px solid var(--border-card);
-    border-radius: var(--radius-sm);
+    padding: 4px 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: flex-end;
 }
 
 .balance-card--primary {
+    padding: 16px;
+    align-items: flex-start;
     background: var(--card-bg);
-    border-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-sm);
 }
 
 .balance-label {
-    font-size: 11px;
-    color: var(--text-label);
+    font-size: 10px;
+    color: var(--text-dim);
     margin-bottom: 6px;
     font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
 .balance-value {
     font-size: 22px;
     font-weight: 400;
+    font-family: var(--font-mono);
     letter-spacing: -0.44px;
     color: var(--text-primary);
     margin-bottom: 4px;
     line-height: 24px;
+    font-variant-numeric: tabular-nums;
 }
 
 .balance-value--sm {
@@ -355,8 +352,10 @@ body {
 }
 
 .balance-change {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
 }
 
 .balance-change.positive { color: var(--green); }
@@ -366,10 +365,6 @@ body {
 /* ── Trading Capacity ───────────────────────────────── */
 .capacity-block {
     margin-bottom: 14px;
-    padding: 15px 17px;
-    background: var(--card-bg-subtle);
-    border: 1px solid var(--border-card);
-    border-radius: var(--radius-sm);
 }
 
 .capacity-header {
@@ -380,13 +375,16 @@ body {
 }
 
 .capacity-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-strong);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
 .capacity-rule {
-    font-size: 11px;
+    font-size: 10px;
+    font-family: var(--font-mono);
     color: var(--text-ghost);
     background: rgba(255, 255, 255, 0.05);
     padding: 3px 7px;
@@ -402,12 +400,14 @@ body {
 
 .capacity-label {
     font-size: 11px;
-    color: var(--text-label);
+    color: var(--text-ghost);
 }
 
 .capacity-used {
     font-size: 11px;
     font-weight: 500;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     color: var(--text-body);
 }
 
@@ -441,6 +441,8 @@ body {
 
 .capacity-remaining {
     font-size: 11px;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     color: var(--text-subtle);
     white-space: nowrap;
     text-align: right;
@@ -459,14 +461,16 @@ body {
 }
 
 .section-title {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     color: var(--text-strong);
 }
 
 .section-value {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     color: var(--text-body);
 }
 
@@ -628,29 +632,22 @@ body {
 }
 
 .no-more-positions {
-    padding: 12.5px;
-    background: rgba(255, 255, 255, 0.01);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 6px;
+    padding: 6px 0 2px;
     text-align: center;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-ghost);
 }
 
 /* ── Analytics Link ─────────────────────────────────── */
 .analytics-link {
     display: block;
-    padding: 17px;
-    background: var(--card-bg-subtle);
-    border: 1px solid var(--border-card);
-    border-radius: 6px;
+    padding: 4px 0;
     text-decoration: none;
-    transition: all 0.2s ease;
+    transition: opacity 0.15s ease;
 }
 
 .analytics-link:hover {
-    background: var(--card-bg);
-    border-color: rgba(255, 255, 255, 0.1);
+    opacity: 0.75;
 }
 
 .analytics-content {
@@ -660,19 +657,19 @@ body {
 }
 
 .analytics-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--text-subtle);
 }
 
 .analytics-subtitle {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-ghost);
     margin-top: 2px;
 }
 
 .analytics-content svg {
-    color: var(--text-faint);
+    color: var(--text-ghost);
 }
 
 /* ── Footer ─────────────────────────────────────────── */

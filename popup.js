@@ -63,29 +63,27 @@ function updateData() {
     refreshBalance();
 }
 
-// Truncate wallet address for collapsed display: 0x1234...abcd
+// Truncate wallet address for inline header display: ●●●● abcd
 function truncateAddress(address) {
-    if (!address || address.length < 10) return address;
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    if (!address || address.length < 4) return address;
+    return `●●●● ${address.slice(-4)}`;
 }
 
 function showWalletCollapsed(address) {
     const collapsed = document.getElementById('walletCollapsed');
-    const expanded = document.getElementById('walletExpanded');
+    const config = document.getElementById('walletConfig');
     const display = document.getElementById('walletAddressDisplay');
-    if (!collapsed || !expanded) return;
     if (display) display.textContent = truncateAddress(address);
-    collapsed.style.display = 'flex';
-    expanded.style.display = 'none';
+    if (collapsed) collapsed.style.display = 'flex';
+    if (config) config.style.display = 'none';
 }
 
 function showWalletExpanded() {
     const collapsed = document.getElementById('walletCollapsed');
-    const expanded = document.getElementById('walletExpanded');
+    const config = document.getElementById('walletConfig');
     const addressInput = document.getElementById('walletAddress');
-    if (!collapsed || !expanded) return;
-    collapsed.style.display = 'none';
-    expanded.style.display = '';
+    if (collapsed) collapsed.style.display = 'none';
+    if (config) config.style.display = '';
     if (addressInput) { addressInput.focus(); addressInput.select(); }
 }
 

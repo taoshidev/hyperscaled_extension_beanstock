@@ -84,11 +84,13 @@ Layered surfaces create depth without heavy shadows. Use the lowest opacity that
 
 | Token | Value | Use when |
 |-------|-------|----------|
-| `--card-bg-subtle` | 2% white | Default card surface (most cards, wallet config) |
-| `--card-bg` | 3% white | Primary/elevated card (Funded Account balance card) |
+| `--card-bg` | 3% white | Primary/elevated card only (Funded Account, Position cards) |
+| `--card-bg-subtle` | 2% white | Setup/config cards (wallet config form) |
 | `--border-card` | 6% white | Standard card border |
 | `--border-outer` | 8% white | Container border, stronger dividers |
 | `--bar-bg` | 6% white | Progress bar tracks |
+
+**Card usage rule:** Use cards only for grouped interactive units or primary KPI elevation. Metric sections (Challenge Progress, Drawdown), secondary data (HL Account), navigation links (Analytics), and utility labels (Trading Capacity) breathe directly on the background — no card background, no border. Spacing and typography create grouping, not containers.
 
 **Never** add box-shadows to cards — depth comes from opacity layering only.
 
@@ -99,21 +101,24 @@ Layered surfaces create depth without heavy shadows. Use the lowest opacity that
 ### Font assignment
 
 - **`ui-sans-serif, system-ui, sans-serif`** (`--font-ui`) — all UI chrome: labels, titles, descriptions, section headers, button text. Resolves to SF Pro on macOS, Segoe UI on Windows — native OS fonts with superior rendering vs a web-loaded font in an extension context
-- **Menlo** (`--font-mono`) — all financial data, without exception: prices, sizes, symbols, percentages, leverage multipliers
+- **Menlo** (`--font-mono`) — all financial data, without exception: prices, sizes, symbols, percentages, leverage multipliers, P&L deltas, section values (e.g. "6.45% / 10%"). **Always pair with `font-variant-numeric: tabular-nums`.**
 
 ### Type scale
 
-| Use | Font | Size | Weight |
-|-----|------|------|--------|
-| Balance / KPI large | Inter | 22px | 400, tracking -0.44px |
-| Balance secondary | Inter | 18px | 400, tracking -0.36px |
-| Section titles (primary: Challenge Progress, Drawdown) | Inter | 14px | 600 |
-| Body | Inter | 14px | 400 |
-| Labels | Inter | 11px | 400 |
-| Tiny labels | Inter | 10px | 400, uppercase |
-| Position PnL | Menlo | 16px | 600, tracking -0.2px |
-| Trading symbols | Menlo | 12px | 600 |
-| Trading data | Menlo | 10px | 400–600 |
+| Use | Font | Size | Weight | Notes |
+|-----|------|------|--------|-------|
+| Balance / KPI large | Menlo | 22px | 400 | tracking -0.44px, tabular-nums |
+| Balance secondary | Menlo | 18px | 400 | tracking -0.36px, tabular-nums |
+| P&L delta / balance change | Menlo | 11px | 400 | tabular-nums |
+| Section titles (Challenge Progress, Drawdown) | UI | 13px | 500 | |
+| Section values (percentages, gauge readings) | Menlo | 12px | 500 | tabular-nums |
+| Capacity header labels | UI | 11px | 400 | uppercase, letter-spacing 0.06em |
+| Balance card labels | UI | 10px | 400 | uppercase, letter-spacing 0.06em, `--text-dim` |
+| Body / misc | UI | 14px | 400 | |
+| Capacity data values | Menlo | 11px | 500 | tabular-nums |
+| Position PnL | Menlo | 16px | 600 | tracking -0.2px |
+| Trading symbols | Menlo | 12px | 600 | |
+| Trading data | Menlo | 10px | 400–600 | |
 
 ### Letter-spacing on KPIs
 
@@ -180,14 +185,14 @@ Never use `cubic-bezier` or spring animations — keep it linear-weighted ease f
 
 Configuration UI that is only needed once (or rarely) must not consume prime vertical real estate on every open. Collapse it once setup is complete.
 
-**Pattern:** A card with two inner states — a collapsed single-line summary and an expanded form. The outer card shell (border, background, margin) stays identical in both states. Only the inner content swaps.
+**Pattern:** Setup UI moves into the header when configured. The expanded form card only appears on first run or when explicitly editing. Zero screen real estate is spent on configuration during normal operation.
 
-**Rules:**
-- Collapsed state shows the minimum to confirm "this is configured": truncated identifier + muted confirmation mark + ghost edit icon.
-- Confirmation mark uses `--text-subtle`, **not** `--accent`. It signals status, not action.
-- The edit icon must be `--text-ghost` at rest — nearly invisible. Hover lifts it to `--text-subtle`. No teal at any state.
-- On save, collapse immediately. The collapsed address is the confirmation — no separate success state needed.
-- The full form must remain in the DOM (just hidden) so existing input values are preserved if the user cancels out of an edit.
+**Wallet address — rules:**
+- Collapsed state lives in `.header-right` as `.wallet-inline`: `●●●● xxxx · Edit`. Last 4 chars only. The `0x` prefix is omitted — brevity over completeness.
+- Address text: `--font-mono`, `--text-dim`. Edit link: `--text-ghost` at rest → `--text-subtle` on hover. No teal at any state.
+- `#walletConfig` card is hidden (`display: none`) whenever a saved address exists.
+- On save, collapse immediately via `showWalletCollapsed(address)`. No separate success state.
+- The full form remains in the DOM (just hidden) so input values are preserved if the user cancels an edit.
 
 ---
 

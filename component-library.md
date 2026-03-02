@@ -27,8 +27,8 @@ A self-contained section displaying a single tracked metric with a title/value h
 
 | Property | Token | Notes |
 |----------|-------|-------|
-| Section title color | `--text-strong` | 14px / 600 — primary instrument label |
-| Section value color | `--text-body` | 13px / 600 — primary reading |
+| Section title color | `--text-strong` | 13px / 500 (UI font) — primary instrument label |
+| Section value color | `--text-body` | 12px / 500 (Menlo, tabular-nums) — primary reading |
 | Bar height | — | `10px` — never lower; this is a gauge, not a rule |
 | Bar radius | — | `5px` track + fill (must match) |
 | Bar spacing | — | `margin-top: 4px`, `margin-bottom: 12px` |
@@ -54,32 +54,71 @@ A self-contained section displaying a single tracked metric with a title/value h
 
 ---
 
-## Accent Card Block
+## Wallet Inline (Header)
 
-A padded card container used to group related data. Appears as a subtly lit surface floating over the dark background. Used by: Wallet Config, Trading Capacity, Position cards.
+The wallet address lives in the header once saved — zero screen real estate wasted on setup UI during normal operation. On first run (no address saved), the full `#walletConfig` card is shown below the header.
 
-### HTML structure
+### Collapsed state (HTML in `.header-right`)
 
 ```html
-<div class="capacity-block">
-  <!-- or wallet-config, or position-card -->
-  <div class="capacity-header">
-    <span class="capacity-title">Title</span>
-    <span class="capacity-rule">Rule text</span>
+<div id="walletCollapsed" class="wallet-inline" style="display: none;">
+  <span id="walletAddressDisplay" class="wallet-inline-address">●●●● abcd</span>
+  <button id="walletEdit" class="wallet-inline-edit">· Edit</button>
+</div>
+```
+
+### Expanded state (shown on first run or when editing)
+
+```html
+<div id="walletConfig" class="wallet-config">
+  <div class="wallet-config-header">
+    <span class="wallet-config-label">Wallet Address</span>
+    <span id="walletStatus" class="wallet-status"></span>
   </div>
-  <!-- content -->
+  <div class="wallet-input-row">
+    <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input" spellcheck="false" />
+    <button id="walletSave" class="wallet-save-btn">Save</button>
+  </div>
 </div>
 ```
 
 ### Tokens used
 
+| Element | Property | Token |
+|---------|----------|-------|
+| Address text | Font | `--font-mono` |
+| Address text | Color | `--text-dim` |
+| Edit button | Color | `--text-ghost` → `--text-subtle` on hover |
+
+### Rule
+
+Never show the full wallet-config card when an address is already saved. `showWalletCollapsed()` hides `#walletConfig` and reveals the inline element; `showWalletExpanded()` reverses this.
+
+---
+
+## Accent Card Block
+
+Card treatment is **reserved** for:
+- Funded Account balance card (primary KPI — the one number that matters most)
+- Position cards (grouped interactive data)
+- Wallet Config form (setup UI, first-run only)
+
+Everything else — Trading Capacity, Challenge Progress, Drawdown, HL Account, Analytics link — breathes directly on the background. No card needed.
+
+### Position card HTML
+
+```html
+<div class="position-card"> ... </div>
+```
+
+### Tokens used (position card)
+
 | Property | Token |
 |----------|-------|
-| Background | `--card-bg-subtle` |
+| Background | `--card-bg` |
 | Border | `--border-card` |
-| Border radius | `--radius-sm` |
-| Title color | `--text-strong` |
-| Rule/badge color | `--text-ghost` |
+| Border radius | `--radius-card` |
+| Padding | `16px` uniform |
 
 ### Variants
 
