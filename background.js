@@ -1,15 +1,32 @@
 // Background service worker for Hyperfunded extension
 
-const LOW_BALANCE_THRESHOLD = 1000;
+const LOW_BALANCE_THRESHOLD = 1;
+const VALIDATOR_URL = 'http://34.187.154.219:48888';
+const EVENT_POLL_INTERVAL_MINUTES = 1;
 
 const TEST_MODE = true;
 const HL_API_URL = TEST_MODE ? "https://api.hyperliquid-testnet.xyz" : "https://api.hyperliquid.xyz";
 const HL_APP_URL = TEST_MODE ? "https://app.hyperliquid-testnet.xyz" : "https://app.hyperliquid.xyz";
 
+// Cache for resolved entity endpoint URLs (hl_address -> endpoint_url)
+let entityEndpointCache = {};
+
 // Listen for extension icon clicks
 chrome.action.onClicked.addListener((tab) => {
   showPositionNotification();
 });
+
+// Set up periodic event polling via alarms
+chrome.alarms.create('pollEvents', { periodInMinutes: EVENT_POLL_INTERVAL_MINUTES });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'pollEvents') {
+    pollEventsForStoredAddress();
+  }
+});
+
+// Poll events on service worker startup
+pollEventsForStoredAddress();
 
 // Listen for messages from popup and content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -40,6 +57,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'fetchEvents') {
+    fetchEvents(request.address, request.since)
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === 'fetchTradePairs') {
+    fetchTradePairs()
+      .then(data => sendResponse({ success: true, data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === 'lowBalanceWarning') {
     showLowBalanceNotification(request.balance);
     sendResponse({ success: true });
@@ -47,38 +78,200 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// Resolve the entity miner endpoint URL for an HL address via the validator
+async function resolveEntityEndpoint(hlAddress) {
+  // Check cache first
+  if (entityEndpointCache[hlAddress]) {
+    console.log('[Hyperscaled BG] Entity endpoint cache hit:', entityEndpointCache[hlAddress]);
+    return entityEndpointCache[hlAddress];
+  }
+
+  const lookupUrl = `${VALIDATOR_URL}/entity/endpoint?hl_address=${hlAddress}`;
+  console.log('[Hyperscaled BG] Resolving entity endpoint:', lookupUrl);
+
+  const res = await fetch(lookupUrl);
+  console.log('[Hyperscaled BG] Entity endpoint response status:', res.status);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('[Hyperscaled BG] Entity endpoint lookup failed:', res.status, body);
+    throw new Error(`Entity endpoint lookup failed (${res.status}): ${body}`);
+  }
+
+  const data = await res.json();
+  console.log('[Hyperscaled BG] Entity endpoint response:', JSON.stringify(data));
+
+  if (!data.endpoint_url) {
+    throw new Error('No endpoint URL found for this address');
+  }
+
+  entityEndpointCache[hlAddress] = data.endpoint_url;
+  return data.endpoint_url;
+}
+
+// Fetch events from the entity miner for an HL address
+async function fetchEvents(hlAddress, since) {
+  console.log('[Hyperscaled BG] fetchEvents called for', hlAddress, 'since', since);
+
+  const endpointUrl = await resolveEntityEndpoint(hlAddress);
+  let url = `${endpointUrl}/api/hl/${hlAddress}/events`;
+  if (since) {
+    url += `?since=${since}`;
+  }
+  console.log('[Hyperscaled BG] Fetching events from:', url);
+
+  const res = await fetch(url);
+  console.log('[Hyperscaled BG] Events response status:', res.status);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('[Hyperscaled BG] Events fetch failed:', res.status, body);
+    throw new Error(`Events API error ${res.status}: ${body}`);
+  }
+
+  const data = await res.json();
+  console.log('[Hyperscaled BG] Events received:', data.count ?? data.events?.length ?? 0, 'events');
+  return data;
+}
+
+// Poll events for the stored HL address, notify on new events
+async function pollEventsForStoredAddress() {
+  try {
+    const stored = await chrome.storage.local.get(['hlAddress', 'lastEventTimestampMs']);
+    const hlAddress = stored.hlAddress;
+    if (!hlAddress) return;
+
+    const since = stored.lastEventTimestampMs || 0;
+    const data = await fetchEvents(hlAddress, since);
+    const events = data.events || [];
+
+    if (events.length === 0) return;
+
+    // Track the newest timestamp
+    let maxTs = since;
+    for (const evt of events) {
+      if (evt.timestamp_ms > maxTs) maxTs = evt.timestamp_ms;
+    }
+
+    // Only notify for genuinely new events (timestamp > stored)
+    const newEvents = events.filter(e => e.timestamp_ms > since);
+    for (const evt of newEvents) {
+      showEventNotification(evt);
+    }
+
+    // Persist latest timestamp so we don't re-notify
+    await chrome.storage.local.set({ lastEventTimestampMs: maxTs });
+
+    // Also store events for popup to display
+    const existingData = await chrome.storage.local.get(['recentEvents']);
+    let allEvents = existingData.recentEvents || [];
+    allEvents = newEvents.concat(allEvents).slice(0, 50); // keep last 50
+    await chrome.storage.local.set({ recentEvents: allEvents });
+  } catch (e) {
+    console.error('[Hyperscaled BG] Event poll failed:', e.message);
+  }
+}
+
+// Show a Chrome notification for an order event
+function showEventNotification(evt) {
+  const status = evt.status === 'accepted' ? 'Accepted' : 'Rejected';
+  const icon = evt.status === 'accepted' ? '' : '';
+  const pair = evt.trade_pair || 'Unknown';
+  const direction = evt.order_type || '';
+
+  const title = `Order ${status}: ${pair} ${direction}`;
+  let message = `Status: ${status}`;
+  if (evt.error_message) {
+    message += `\nError: ${evt.error_message}`;
+  }
+  if (evt.fill_hash) {
+    message += `\nFill: ${evt.fill_hash.slice(0, 10)}...`;
+  }
+
+  chrome.notifications.create(`hyperfunded-event-${evt.timestamp_ms}`, {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title,
+    message,
+    priority: evt.status === 'rejected' ? 2 : 1,
+    requireInteraction: evt.status === 'rejected'
+  }, (id) => {
+    if (chrome.runtime.lastError) {
+      console.error('Event notification error:', chrome.runtime.lastError);
+    }
+  });
+}
+
+// Fetch allowed trade pairs from validator
+async function fetchTradePairs() {
+  const res = await fetch(`${VALIDATOR_URL}/trade-pairs`);
+  if (!res.ok) throw new Error(`Trade pairs API error ${res.status}`);
+  return res.json();
+}
+
 // Fetch trader limits from validator endpoint
 async function fetchTraderLimits(address) {
-  const res = await fetch(`http://localhost:48888/hl-traders/${address}/limits`);
+  const res = await fetch(`${VALIDATOR_URL}/hl-traders/${address}/limits`);
   if (!res.ok) throw new Error(`Validator limits API error ${res.status}`);
   return res.json();
 }
 
 // Fetch trader data from validator endpoint
 async function fetchValidatorData(address) {
-  const res = await fetch(`http://localhost:48888/hl-traders/${address}`);
+  const res = await fetch(`${VALIDATOR_URL}/hl-traders/${address}`);
   if (!res.ok) throw new Error(`Validator API error ${res.status}`);
   return res.json();
 }
 
-// Fetch account state from Hyperliquid API
+// Fetch account state from Hyperliquid API (perps + spot)
 async function fetchHLBalance(address) {
-  const res = await fetch(HL_API_URL + '/info', {
+  console.log('[Hyperscaled BG] fetchHLBalance called for', address);
+
+  // Fetch perps state
+  const perpsRes = await fetch(HL_API_URL + '/info', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'clearinghouseState', user: address })
   });
+  if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
+  const perpsData = await perpsRes.json();
+  // Use withdrawable (pure USDC collateral) not accountValue (which includes unrealized PnL)
+  const perpsWithdrawable = parseFloat(perpsData?.withdrawable) || 0;
+  console.log('[Hyperscaled BG] perpsWithdrawable:', perpsWithdrawable);
 
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  // Fetch spot state (non-blocking — if this fails, just use perps)
+  let spotUSDC = 0;
+  try {
+    const spotRes = await fetch(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'spotClearinghouseState', user: address })
+    });
+    if (spotRes.ok) {
+      const spotData = await spotRes.json();
+      const balances = spotData?.balances || [];
+      for (const b of balances) {
+        // Only count USDC; exclude USDT for pure USDC balance
+        if (b.coin === 'USDC') {
+          spotUSDC += parseFloat(b.total) || 0;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Hyperscaled BG] Spot fetch failed, using perps only:', e.message);
+  }
+  console.log('[Hyperscaled BG] spotUSDC:', spotUSDC);
 
-  const data = await res.json();
-  const accountValue = parseFloat(data?.marginSummary?.accountValue);
-  if (isNaN(accountValue)) throw new Error('Invalid account data');
+  const accountValue = perpsWithdrawable + spotUSDC;
+  const perpsValue = perpsWithdrawable;
+  console.log('[Hyperscaled BG] total accountValue:', accountValue);
 
   return {
     accountValue,
-    totalMarginUsed: parseFloat(data?.marginSummary?.totalMarginUsed) || 0,
-    totalNtlPos: parseFloat(data?.marginSummary?.totalNtlPos) || 0,
+    perpsValue,
+    spotUSDC,
+    totalMarginUsed: parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0,
+    totalNtlPos: parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0,
   };
 }
 

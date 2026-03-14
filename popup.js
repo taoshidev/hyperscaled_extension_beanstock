@@ -1,7 +1,30 @@
-const LOW_BALANCE_THRESHOLD = 1000;
+const LOW_BALANCE_THRESHOLD = 1;
 let storedAddress = null;
 const TEST_MODE = true;
 let traderLimits = null;
+let refreshIntervalId = null;
+
+// Safe wrapper for chrome.runtime.sendMessage — silently fails if context is gone
+function safeSendMessage(msg) {
+    return new Promise((resolve, reject) => {
+        try {
+            if (!chrome.runtime?.id) {
+                reject(new Error('Extension context invalidated'));
+                return;
+            }
+            chrome.runtime.sendMessage(msg, (res) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                if (res?.success) resolve(res.data);
+                else reject(new Error(res?.error || 'Unknown error'));
+            });
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
 
 function getHlAppUrl() {
     return TEST_MODE
@@ -15,26 +38,14 @@ function fmtUsd(n) {
     });
 }
 
-const CHALLENGE_TARGET = 10;
-const DRAWDOWN_MAX = 5;
+const CHALLENGE_TARGET = 10; // fallback if API doesn't provide
+const DRAWDOWN_MAX = 5;     // fallback if API doesn't provide
 
 // Fetch balance from background and update UI
 async function refreshBalance() {
     if (!storedAddress) return;
     try {
-        const response = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(
-                { action: 'fetchBalance', address: storedAddress },
-                (res) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                        return;
-                    }
-                    if (res?.success) resolve(res.data);
-                    else reject(new Error(res?.error || 'Unknown error'));
-                }
-            );
-        });
+        const response = await safeSendMessage({ action: 'fetchBalance', address: storedAddress });
 
         const balance = response.accountValue;
         const hlBalanceEl = document.getElementById('hlBalance');
@@ -58,40 +69,49 @@ async function refreshBalance() {
 async function refreshValidatorData() {
     if (!storedAddress) return;
     try {
-        const result = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(
-                { action: 'fetchValidatorData', address: storedAddress },
-                (res) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                        return;
-                    }
-                    if (res?.success) resolve(res.data);
-                    else reject(new Error(res?.error || 'Unknown error'));
-                }
-            );
-        });
+        const result = await safeSendMessage({ action: 'fetchValidatorData', address: storedAddress });
+        console.log('[Hyperscaled Popup] Validator data:', JSON.stringify(result).slice(0, 1000));
 
-        if (result.status !== 'success') return;
+        if (result.status && result.status !== 'success') {
+            console.warn('[Hyperscaled Popup] Validator returned non-success status:', result.status);
+            return;
+        }
 
         const accountSize = result.account_size || 0;
-        const positions = result.positions || [];
+        // API returns {positions: {positions: [...]}} — unwrap nested structure
+        const positionsRaw = result.positions;
+        const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
+        const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
 
         // Compute PnL from positions
         let totalUnrealizedPnl = 0;
         let totalNotional = 0;
         let maxSingleNotional = 0;
 
-        for (const pos of positions) {
-            const unrealizedPnl = parseFloat(pos.unrealized_pnl) || 0;
-            const notional = Math.abs(parseFloat(pos.position_value || pos.notional || 0));
-            totalUnrealizedPnl += unrealizedPnl;
+        for (const pos of openPositions) {
+            // Notional from net_leverage * accountSize, or sum of order values
+            const notional = pos.net_leverage != null
+                ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
+                : (pos.orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
+            // PnL from current_return (decimal) * accountSize
+            const pnl = (parseFloat(pos.current_return) || 0) * accountSize;
+
+            totalUnrealizedPnl += pnl;
             totalNotional += notional;
             if (notional > maxSingleNotional) maxSingleNotional = notional;
         }
 
-        const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
-        const drawdownCurrent = result.drawdown ? (parseFloat(result.drawdown.ledger_max_drawdown) || 0) : 0;
+        // Challenge progress from API
+        const cp = result.challenge_progress || {};
+        const returnsPct = parseFloat(cp.returns_percent) || 0;
+        const targetPct = parseFloat(cp.target_return_percent) || CHALLENGE_TARGET;
+        const challengeCompletionPct = parseFloat(cp.challenge_completion_percent) || 0;
+        const inChallenge = cp.in_challenge_period ?? false;
+
+        // Drawdown from API
+        const drawdownPct = parseFloat(cp.drawdown_percent) || 0;
+        const drawdownLimitPct = parseFloat(cp.drawdown_limit_percent) || DRAWDOWN_MAX;
+        const drawdownUsagePct = parseFloat(cp.drawdown_usage_percent) || 0;
 
         // Funded balance
         const fundedBalanceEl = document.getElementById('fundedBalance');
@@ -101,6 +121,7 @@ async function refreshValidatorData() {
         const fundedChangeEl = document.getElementById('fundedChange');
         if (fundedChangeEl) {
             const sign = totalUnrealizedPnl >= 0 ? '+' : '';
+            const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
             fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${sign}${pnlPct.toFixed(2)}%)`;
             const changeParent = fundedChangeEl.closest('.balance-change');
             if (changeParent) {
@@ -108,20 +129,25 @@ async function refreshValidatorData() {
             }
         }
 
+        // Status badge
+        const statusBadge = document.querySelector('.status-badge');
+        if (statusBadge) {
+            statusBadge.textContent = inChallenge ? 'In Challenge' : 'Funded';
+        }
+
         // Challenge progress
         const challengeValueEl = document.getElementById('challengeValue');
         const challengeFillEl = document.getElementById('challengeFill');
         const challengeLabelEl = document.getElementById('challengeLabel');
-        if (challengeValueEl) challengeValueEl.textContent = `${pnlPct.toFixed(2)}% / ${CHALLENGE_TARGET}%`;
+        if (challengeValueEl) challengeValueEl.textContent = `${returnsPct.toFixed(2)}% / ${targetPct}%`;
         if (challengeFillEl) {
-            const challengeFillPct = Math.min((Math.max(pnlPct, 0) / CHALLENGE_TARGET) * 100, 100);
-            challengeFillEl.style.width = challengeFillPct + '%';
+            challengeFillEl.style.width = Math.min(challengeCompletionPct, 100) + '%';
         }
         if (challengeLabelEl) {
-            const targetDollar = accountSize * (CHALLENGE_TARGET / 100);
-            const remainingDollar = targetDollar - totalUnrealizedPnl;
-            challengeLabelEl.textContent = remainingDollar > 0
-                ? `${fmtUsd(remainingDollar)} to target (${fmtUsd(targetDollar)} goal)`
+            const remainingPct = targetPct - returnsPct;
+            const remainingDollar = accountSize * (remainingPct / 100);
+            challengeLabelEl.textContent = remainingPct > 0
+                ? `${fmtUsd(remainingDollar)} to target (${targetPct}% goal)`
                 : 'Target reached!';
         }
 
@@ -129,17 +155,32 @@ async function refreshValidatorData() {
         const drawdownValueEl = document.getElementById('drawdownValue');
         const drawdownFillEl = document.getElementById('drawdownFill');
         const drawdownLabelEl = document.getElementById('drawdownLabel');
-        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownCurrent.toFixed(1)}% / ${DRAWDOWN_MAX}%`;
+        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownPct.toFixed(2)}% / ${drawdownLimitPct}%`;
         if (drawdownFillEl) {
-            const drawdownFillPct = Math.min((drawdownCurrent / DRAWDOWN_MAX) * 100, 100);
-            drawdownFillEl.style.width = drawdownFillPct + '%';
+            drawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
         }
         if (drawdownLabelEl) {
-            const bufferDollar = accountSize * ((DRAWDOWN_MAX - drawdownCurrent) / 100);
-            drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer`;
+            const bufferPct = drawdownLimitPct - drawdownPct;
+            const bufferDollar = accountSize * (bufferPct / 100);
+            drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer (${bufferPct.toFixed(2)}%)`;
         }
 
-        // Capacity
+        // Capacity — per pair
+        const maxPerPair = (traderLimits && traderLimits.max_position_per_pair_usd) ? parseFloat(traderLimits.max_position_per_pair_usd) : accountSize * 0.625;
+        const largestPairNotional = maxSingleNotional;
+        const perPairUsedEl = document.getElementById('perPairUsed');
+        const perPairMaxEl = document.getElementById('perPairMax');
+        const perPairFillEl = document.getElementById('perPairFill');
+        const perPairRemainingEl = document.getElementById('perPairRemaining');
+        if (perPairUsedEl) perPairUsedEl.textContent = fmtUsd(largestPairNotional);
+        if (perPairMaxEl) perPairMaxEl.textContent = fmtUsd(maxPerPair);
+        if (perPairFillEl) {
+            const ppPct = maxPerPair > 0 ? Math.min((largestPairNotional / maxPerPair) * 100, 100) : 0;
+            perPairFillEl.style.width = ppPct + '%';
+        }
+        if (perPairRemainingEl) perPairRemainingEl.textContent = fmtUsd(Math.max(maxPerPair - largestPairNotional, 0));
+
+        // Capacity — portfolio total
         const maxTotal = (traderLimits && traderLimits.max_portfolio_usd) ? parseFloat(traderLimits.max_portfolio_usd) : accountSize * 1.25;
         const capacityUsedEl = document.getElementById('capacityUsed');
         const capacityMaxEl = document.getElementById('capacityMax');
@@ -154,10 +195,10 @@ async function refreshValidatorData() {
         if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalNotional, 0));
 
         // Positions
-        renderPositions(positions);
+        renderPositions(openPositions, accountSize);
 
     } catch (e) {
-        console.error('Validator data fetch failed:', e);
+        console.error('[Hyperscaled Popup] Validator data fetch failed:', e.message, e);
         setPlaceholders();
     }
 }
@@ -165,31 +206,10 @@ async function refreshValidatorData() {
 async function refreshTraderLimits() {
     if (!storedAddress) return;
     try {
-        const result = await new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(
-                { action: 'fetchTraderLimits', address: storedAddress },
-                (res) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                        return;
-                    }
-                    if (res?.success) resolve(res.data);
-                    else reject(new Error(res?.error || 'Unknown error'));
-                }
-            );
-        });
+        const result = await safeSendMessage({ action: 'fetchTraderLimits', address: storedAddress });
+        console.log('[Hyperscaled Popup] Trader limits:', JSON.stringify(result).slice(0, 500));
 
         traderLimits = result;
-
-        // Update capacity rule label dynamically
-        const ruleEl = document.getElementById('capacityRule');
-        if (ruleEl && traderLimits) {
-            const perPair = traderLimits.max_position_per_pair_usd;
-            const portfolio = traderLimits.max_portfolio_usd;
-            if (perPair != null && portfolio != null) {
-                ruleEl.textContent = `${fmtUsd(perPair)} / ${fmtUsd(portfolio)} limits`;
-            }
-        }
     } catch (e) {
         console.error('Trader limits fetch failed:', e);
     }
@@ -197,7 +217,8 @@ async function refreshTraderLimits() {
 
 function setPlaceholders() {
     const ids = ['fundedBalance', 'fundedChange', 'challengeValue', 'challengeLabel',
-                 'drawdownValue', 'drawdownLabel', 'capacityUsed', 'capacityMax', 'capacityRemaining'];
+                 'drawdownValue', 'drawdownLabel', 'perPairUsed', 'perPairMax', 'perPairRemaining',
+                 'capacityUsed', 'capacityMax', 'capacityRemaining'];
     for (const id of ids) {
         const el = document.getElementById(id);
         if (el) el.textContent = '--';
@@ -206,7 +227,7 @@ function setPlaceholders() {
     if (container) container.innerHTML = '<div class="no-more-positions">Data unavailable</div>';
 }
 
-function renderPositions(positions) {
+function renderPositions(positions, accountSize) {
     const container = document.getElementById('positionsContainer');
     if (!container) return;
 
@@ -216,16 +237,29 @@ function renderPositions(positions) {
     }
 
     container.innerHTML = positions.map(pos => {
-        const symbol = pos.coin || pos.symbol || 'UNKNOWN';
-        const szi = parseFloat(pos.szi || pos.size || 0);
-        const isLong = szi > 0;
+        // trade_pair is an array: ["DOGEUSD", "DOGE/USD", fee1, fee2, maxLev]
+        const tp = pos.trade_pair || [];
+        const displayPair = typeof tp === 'string' ? tp : (tp[1] || tp[0] || 'UNKNOWN');
+        const symbol = typeof tp === 'string' ? tp.replace(/\/.*$/, '') : ((tp[0] || '').replace(/USD[CT]?$/, '') || 'UNKNOWN');
+
+        // Direction & leverage from net_leverage or last order
+        const lastOrder = pos.orders?.[pos.orders.length - 1];
+        const netLev = parseFloat(pos.net_leverage);
+        const isLong = !isNaN(netLev) ? netLev > 0 : (lastOrder?.order_type === 'LONG');
         const direction = isLong ? 'LONG' : 'SHORT';
         const badgeClass = isLong ? 'long' : 'short';
-        const absSize = Math.abs(szi);
-        const entryPx = parseFloat(pos.entry_px || pos.entry_price || 0);
-        const markPx = parseFloat(pos.mark_px || pos.mark_price || 0);
-        const leverage = pos.leverage ? `${parseFloat(pos.leverage.value || pos.leverage)}x` : '--';
-        const pnl = parseFloat(pos.unrealized_pnl) || 0;
+        const leverage = !isNaN(netLev) ? Math.abs(netLev).toFixed(2) + 'x' : (lastOrder?.leverage ? parseFloat(lastOrder.leverage).toFixed(2) + 'x' : '--');
+
+        // Value
+        const value = !isNaN(netLev)
+            ? Math.abs(netLev) * (accountSize || 0)
+            : Math.abs(parseFloat(lastOrder?.value) || 0);
+
+        // Entry price from first order
+        const entryPx = parseFloat(pos.orders?.[0]?.price) || 0;
+
+        // PnL from current_return (decimal) * accountSize
+        const pnl = (parseFloat(pos.current_return) || 0) * (accountSize || 0);
         const pnlSign = pnl >= 0 ? '+' : '';
         const pnlClass = pnl >= 0 ? 'positive' : 'negative';
 
@@ -233,23 +267,19 @@ function renderPositions(positions) {
             <div class="position-card">
                 <div class="position-header">
                     <div class="position-symbol">
-                        <span class="symbol-name">${symbol}-PERP</span>
+                        <span class="symbol-name">${displayPair}</span>
                         <span class="position-badge ${badgeClass}">${direction}</span>
                     </div>
                     <div class="position-pnl ${pnlClass}">${pnlSign}${fmtUsd(pnl)}</div>
                 </div>
                 <div class="position-details">
                     <div class="detail-row">
-                        <span class="detail-label">Size</span>
-                        <span class="detail-value">${absSize} ${symbol}</span>
+                        <span class="detail-label">Value</span>
+                        <span class="detail-value">${fmtUsd(value)}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Entry</span>
                         <span class="detail-value">${fmtUsd(entryPx)}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Mark</span>
-                        <span class="detail-value">${fmtUsd(markPx)}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Leverage</span>
@@ -259,6 +289,115 @@ function renderPositions(positions) {
             </div>
         `;
     }).join('');
+}
+
+// Fetch and display order events
+async function refreshEvents() {
+    console.log('[Hyperscaled Popup] refreshEvents called, storedAddress:', storedAddress);
+    if (!storedAddress) {
+        console.log('[Hyperscaled Popup] No stored address, skipping events');
+        const container = document.getElementById('eventsContainer');
+        if (container) container.innerHTML = '<div class="no-more-positions">Set wallet address to see events</div>';
+        return;
+    }
+    try {
+        console.log('[Hyperscaled Popup] Sending fetchEvents message to background...');
+        const result = await safeSendMessage({ action: 'fetchEvents', address: storedAddress, since: 0 });
+        console.log('[Hyperscaled Popup] fetchEvents result:', JSON.stringify(result).slice(0, 500));
+
+        const events = result.events || [];
+        console.log('[Hyperscaled Popup] Rendering', events.length, 'events');
+        renderEvents(events);
+
+        // Update stored timestamp to latest
+        if (events.length > 0) {
+            let maxTs = 0;
+            for (const e of events) {
+                if (e.timestamp_ms > maxTs) maxTs = e.timestamp_ms;
+            }
+            chrome.storage.local.set({ lastEventTimestampMs: maxTs });
+            chrome.storage.local.set({ recentEvents: events.slice(0, 50) });
+        }
+    } catch (e) {
+        console.error('[Hyperscaled Popup] Events fetch failed:', e.message, e);
+        // Fall back to cached events
+        const cached = await new Promise(resolve => {
+            chrome.storage.local.get(['recentEvents'], resolve);
+        });
+        console.log('[Hyperscaled Popup] Cached events:', cached.recentEvents?.length ?? 0);
+        if (cached.recentEvents && cached.recentEvents.length > 0) {
+            renderEvents(cached.recentEvents);
+        } else {
+            const container = document.getElementById('eventsContainer');
+            if (container) container.innerHTML = `<div class="no-more-positions">Unable to load events: ${e.message}</div>`;
+        }
+    }
+}
+
+function renderEvents(events) {
+    const container = document.getElementById('eventsContainer');
+    const countEl = document.getElementById('eventsCount');
+    if (!container) return;
+
+    if (!events || events.length === 0) {
+        container.innerHTML = '<div class="no-more-positions">No events yet</div>';
+        if (countEl) countEl.textContent = '';
+        return;
+    }
+
+    if (countEl) countEl.textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+
+    // Show most recent first, limit to 20 in the popup
+    const display = events
+        .sort((a, b) => b.timestamp_ms - a.timestamp_ms)
+        .slice(0, 20);
+
+    container.innerHTML = display.map(evt => {
+        const isAccepted = evt.status === 'accepted';
+        const statusClass = isAccepted ? 'event-accepted' : 'event-rejected';
+        const statusLabel = isAccepted ? 'Accepted' : 'Rejected';
+        const pair = evt.trade_pair || 'Unknown';
+        const direction = evt.order_type || '';
+        const badgeClass = direction === 'LONG' ? 'long' : direction === 'SHORT' ? 'short' : '';
+        const time = formatEventTime(evt.timestamp_ms);
+
+        let details = '';
+        if (evt.error_message) {
+            details = `<div class="event-error">${evt.error_message}</div>`;
+        }
+        if (evt.fill_hash) {
+            details += `<div class="event-fill">Fill: ${evt.fill_hash.slice(0, 14)}...</div>`;
+        }
+
+        return `
+            <div class="event-card ${statusClass}">
+                <div class="event-header">
+                    <div class="event-pair">
+                        <span class="event-pair-name">${pair}</span>
+                        ${direction ? `<span class="position-badge ${badgeClass}">${direction}</span>` : ''}
+                    </div>
+                    <span class="event-status-badge ${statusClass}">${statusLabel}</span>
+                </div>
+                ${details}
+                <div class="event-time">${time}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function formatEventTime(timestampMs) {
+    const d = new Date(timestampMs);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHr = Math.floor(diffMs / 3600000);
+
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHr < 24) return `${diffHr}h ago`;
+
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+        ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 // Load saved address from storage
@@ -281,6 +420,7 @@ function updateData() {
     refreshBalance();
     refreshValidatorData();
     refreshTraderLimits();
+    refreshEvents();
 }
 
 // Function to update status message
@@ -507,10 +647,20 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // ── Periodic data refresh ───────────────────────────────
+    console.log('[Hyperscaled Popup] Starting data refresh, storedAddress:', storedAddress);
     refreshBalance();
     refreshValidatorData();
     refreshTraderLimits();
-    setInterval(updateData, 10000);
+    refreshEvents();
+    refreshIntervalId = setInterval(updateData, 10000);
+});
+
+// Clean up interval when popup closes to avoid context invalidation errors
+window.addEventListener('unload', () => {
+    if (refreshIntervalId) {
+        clearInterval(refreshIntervalId);
+        refreshIntervalId = null;
+    }
 });
 
 // Handle notification clicks

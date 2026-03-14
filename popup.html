@@ -61,12 +61,23 @@
         <div class="capacity-block">
             <div class="capacity-header">
                 <span class="capacity-title">Trading Capacity</span>
-                <span class="capacity-rule" id="capacityRule">62.5% / 125% limits</span>
             </div>
             <div class="capacity-rows">
                 <div class="capacity-row">
                     <div class="capacity-row-top">
-                        <span class="capacity-label">Total across all positions</span>
+                        <span class="capacity-label">Per Pair Limit</span>
+                        <span class="capacity-used"><span id="perPairUsed">--</span> <span class="capacity-of">of</span> <span id="perPairMax">--</span></span>
+                    </div>
+                    <div class="capacity-bar-wrap">
+                        <div class="capacity-bar">
+                            <div class="capacity-fill capacity-fill--total" id="perPairFill" style="width: 0%;"></div>
+                        </div>
+                        <span class="capacity-remaining"><span id="perPairRemaining">--</span> left</span>
+                    </div>
+                </div>
+                <div class="capacity-row">
+                    <div class="capacity-row-top">
+                        <span class="capacity-label">Portfolio Total</span>
                         <span class="capacity-used"><span id="capacityUsed">--</span> <span class="capacity-of">of</span> <span id="capacityMax">--</span></span>
                     </div>
                     <div class="capacity-bar-wrap">
@@ -111,6 +122,17 @@
             </div>
             <div id="positionsContainer">
                 <div class="no-more-positions">Loading positions...</div>
+            </div>
+        </div>
+
+        <!-- Order Events -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">Order Events</div>
+                <span class="events-count" id="eventsCount"></span>
+            </div>
+            <div id="eventsContainer">
+                <div class="no-more-positions">Loading events...</div>
             </div>
         </div>
 

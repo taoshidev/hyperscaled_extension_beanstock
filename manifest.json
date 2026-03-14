@@ -18,14 +18,17 @@
   },
   "permissions": [
     "notifications",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://app.hyperliquid.xyz/trade/*",
     "https://api.hyperliquid.xyz/*",
     "https://app.hyperliquid-testnet.xyz/trade/*",
     "https://api.hyperliquid-testnet.xyz/*",
-    "http://localhost:48888/*"
+    "http://34.187.154.219:48888/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "content_scripts": [
     {

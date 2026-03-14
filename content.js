@@ -6,13 +6,14 @@
 
 (() => {
   // ── Environment detection ─────────────────────────────────────────────────
-  const IS_TESTNET = location.hostname === "app.hyperliquid-testnet.xyz";
+  // const IS_TESTNET = location.hostname === "app.hyperliquid-testnet.xyz";
+  const IS_TESTNET = true;
   const HL_APP_ORIGIN = IS_TESTNET
     ? "https://app.hyperliquid-testnet.xyz"
     : "https://app.hyperliquid.xyz";
 
-  // ── Supported trading pairs ─────────────────────────────────────────────────
-  const SUPPORTED_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA"];
+  // ── Supported trading pairs (fetched from validator, fallback to defaults) ──
+  let SUPPORTED_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA"];
   const UNSUPPORTED_OVERLAY_ID = "hf-unsupported-overlay";
   const LOW_BALANCE_THRESHOLD = 1; // TODO change to 1000
   const LOW_BALANCE_OVERLAY_ID = "hf-low-balance-overlay";
@@ -54,7 +55,7 @@
       maximumFractionDigits: 2,
     });
 
-  const pct = (used, max) => Math.min((used / max) * 100, 100).toFixed(1);
+  const pct = (used, max) => max > 0 ? Math.min((used / max) * 100, 100).toFixed(1) : "0.0";
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
   // ── Banner HTML ────────────────────────────────────────────────────────────
@@ -253,40 +254,81 @@
 
   // ── Balance checking & trade blocking ──────────────────────────────────────
 
-  function getStoredAddress() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(["hlAddress"], (result) => {
-        resolve(result.hlAddress || null);
-      });
-    });
-  }
-
   function detectAddressFromPage() {
     try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        const val = localStorage.getItem(key);
-        if (!val) continue;
-        if (/^0x[a-fA-F0-9]{40}$/.test(val.trim())) return val.trim();
+      // 1. wagmi store — most reliable, contains the actual connected wallet
+      const wagmiRaw = localStorage.getItem("wagmi.store");
+      if (wagmiRaw) {
         try {
-          const json = JSON.stringify(JSON.parse(val));
-          const m = json.match(/0x[a-fA-F0-9]{40}/);
-          if (m) return m[0];
+          const wagmi = JSON.parse(wagmiRaw);
+          // wagmi v2 shape: state.connections.__type=Map, value=[[id, {accounts:[...]}]]
+          const connections = wagmi?.state?.connections;
+          const entries = connections?.value || connections;
+          if (Array.isArray(entries)) {
+            for (const entry of entries) {
+              const conn = Array.isArray(entry) ? entry[1] : entry;
+              const accounts = conn?.accounts || [];
+              for (const a of accounts) {
+                if (/^0x[a-fA-F0-9]{40}$/.test(a)) return a;
+              }
+            }
+          }
+          // wagmi v1 fallback: state.data.account
+          const v1Addr = wagmi?.state?.data?.account;
+          if (v1Addr && /^0x[a-fA-F0-9]{40}$/.test(v1Addr)) return v1Addr;
         } catch {}
+      }
+
+      // 2. DOM — HL shows truncated address in the header/connect button
+      const candidates = document.querySelectorAll(
+        'button, [class*="account"], [class*="address"], [class*="wallet"], header *'
+      );
+      for (const el of candidates) {
+        if (el.children && el.children.length > 0) continue;
+        const txt = (el.textContent || "").trim();
+        // Match full address
+        const full = txt.match(/0x[a-fA-F0-9]{40}/);
+        if (full) return full[0];
+        // Match truncated "0x7939...8BB" pattern and look it up
+        const trunc = txt.match(/^(0x[a-fA-F0-9]{4,6})[.\u2026]{2,3}([a-fA-F0-9]{3,6})$/);
+        if (trunc) {
+          // Search localStorage for the full address matching this prefix+suffix
+          for (let i = 0; i < localStorage.length; i++) {
+            const val = localStorage.getItem(localStorage.key(i)) || "";
+            const m = val.match(/0x[a-fA-F0-9]{40}/g);
+            if (!m) continue;
+            for (const addr of m) {
+              if (addr.toLowerCase().startsWith(trunc[1].toLowerCase()) &&
+                  addr.toLowerCase().endsWith(trunc[2].toLowerCase())) {
+                return addr;
+              }
+            }
+          }
+        }
       }
     } catch {}
     return null;
   }
 
   async function getUserAddress() {
-    const stored = await getStoredAddress();
-    if (stored) return stored;
+    // Always try to read from the page first
     const detected = detectAddressFromPage();
     if (detected) {
-      chrome.storage.local.set({ hlAddress: detected });
+      // Sync detected address back to storage so popup/background use the same one
+      chrome.storage.local.get(["hlAddress"], (result) => {
+        if (result.hlAddress !== detected) {
+          console.log("[Hyperscaled] Syncing detected address to storage:", detected);
+          chrome.storage.local.set({ hlAddress: detected });
+        }
+      });
       return detected;
     }
-    return null;
+    // Fall back to manually entered address from popup
+    return new Promise((resolve) => {
+      chrome.storage.local.get(["hlAddress"], (result) => {
+        resolve(result.hlAddress || null);
+      });
+    });
   }
 
   async function fetchTraderLimits() {
@@ -320,6 +362,33 @@
     }
   }
 
+  async function fetchTradePairs() {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: "fetchTradePairs" },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (response?.success) resolve(response.data);
+            else reject(new Error(response?.error || "Unknown error"));
+          }
+        );
+      });
+
+      const pairs = result.allowed_trade_pairs || [];
+      if (pairs.length > 0) {
+        // Extract base symbol from trade_pair_id (e.g. "BTCUSD" -> "BTC")
+        SUPPORTED_SYMBOLS = pairs.map(p => p.trade_pair_id.replace(/USD[CT]?$/, ""));
+        console.log("[Hyperscaled] Loaded", SUPPORTED_SYMBOLS.length, "supported symbols from validator");
+      }
+    } catch (e) {
+      console.error("[Hyperscaled] Trade pairs fetch failed, using defaults:", e);
+    }
+  }
+
   async function fetchValidatorData() {
     const address = await getUserAddress();
     if (!address) return;
@@ -339,40 +408,46 @@
         );
       });
 
-      if (result.status !== "success") return;
+      if (result.status && result.status !== "success") return;
 
       ACCOUNT.fundedSize = result.account_size || 0;
 
-      // Compute PnL % from positions
-      const positions = result.positions || [];
+      // Compute PnL % from positions — API returns {positions: {positions: [...]}}
+      const positionsRaw = result.positions;
+      const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
+      console.log("[Hyperscaled] Validator data loaded, account_size:", ACCOUNT.fundedSize, "positions:", positions.length);
+      const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
       let totalUnrealizedPnl = 0;
       let totalNotional = 0;
       let maxSingleNotional = 0;
 
       // Build per-pair notional map
       const notionalByPair = {};
-      for (const pos of positions) {
-        const unrealizedPnl = parseFloat(pos.unrealized_pnl) || 0;
-        const notional = Math.abs(parseFloat(pos.position_value || pos.notional || 0));
-        totalUnrealizedPnl += unrealizedPnl;
+      for (const pos of openPositions) {
+        const notional = pos.net_leverage != null
+          ? Math.abs(parseFloat(pos.net_leverage)) * ACCOUNT.fundedSize
+          : (pos.orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
+        const pnl = (parseFloat(pos.current_return) || 0) * ACCOUNT.fundedSize;
+
+        totalUnrealizedPnl += pnl;
         totalNotional += notional;
         if (notional > maxSingleNotional) maxSingleNotional = notional;
 
-        const coin = (pos.coin || pos.symbol || "").toUpperCase();
+        // Extract coin from trade_pair array: ["DOGEUSD", "DOGE/USD", ...]
+        const tp = pos.trade_pair || [];
+        const coin = (typeof tp === "string" ? tp : (tp[0] || "")).replace(/USD[CT]?$/, "").toUpperCase();
         if (coin) {
           notionalByPair[coin] = (notionalByPair[coin] || 0) + notional;
         }
       }
       ACCOUNT.notionalByPair = notionalByPair;
 
-      if (ACCOUNT.fundedSize > 0) {
-        ACCOUNT.challengeCurrent = parseFloat(((totalUnrealizedPnl / ACCOUNT.fundedSize) * 100).toFixed(2));
-      }
-
-      // Drawdown from response
-      if (result.drawdown) {
-        ACCOUNT.drawdownCurrent = parseFloat(result.drawdown.ledger_max_drawdown) || 0;
-      }
+      // Challenge & drawdown from API challenge_progress
+      const cp = result.challenge_progress || {};
+      ACCOUNT.challengeCurrent = parseFloat(cp.returns_percent) || 0;
+      ACCOUNT.challengeTarget = parseFloat(cp.target_return_percent) || ACCOUNT.challengeTarget;
+      ACCOUNT.drawdownCurrent = parseFloat(cp.drawdown_percent) || 0;
+      ACCOUNT.drawdownMax = parseFloat(cp.drawdown_limit_percent) || ACCOUNT.drawdownMax;
 
       ACCOUNT.openTotalUsed = totalNotional;
       ACCOUNT.openSingleUsed = maxSingleNotional;
@@ -395,7 +470,9 @@
 
   async function checkBalance() {
     const address = await getUserAddress();
+    console.log("[Hyperscaled] checkBalance address:", address);
     if (!address) {
+      console.warn("[Hyperscaled] No address found — blocking trades");
       isLowBalance = true;
       balanceVerified = false;
       showTradeBlockOverlay("no-address");
@@ -412,6 +489,7 @@
         chrome.runtime.sendMessage(
           { action: "fetchBalance", address },
           (response) => {
+            console.log("[Hyperscaled] fetchBalance response:", response);
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
               return;
@@ -422,12 +500,8 @@
         );
       });
 
+      console.log("[Hyperscaled] Balance result:", result);
       currentBalance = result.accountValue;
-      currentBalance = result.accountValue;
-      if (IS_TESTNET) {
-        currentBalance = 10;
-      }
-
       ACCOUNT.hlBalance = currentBalance;
       balanceVerified = true;
 
@@ -548,6 +622,7 @@
     checkBalance();
     fetchValidatorData();
     fetchTraderLimits();
+    fetchTradePairs();
     if (balanceCheckTimer) clearInterval(balanceCheckTimer);
     balanceCheckTimer = setInterval(() => {
       checkBalance();
@@ -828,6 +903,9 @@
   function enforceTradeBlock() {
     if (isEnforcingBlock) return;
     isEnforcingBlock = true;
+    // Disconnect observer before modifying attributes it watches,
+    // otherwise our own changes re-trigger it in an infinite loop.
+    if (tradeBlockObserver) tradeBlockObserver.disconnect();
     try {
       const buttons = findTradeButtons();
       for (const btn of buttons) {
@@ -839,6 +917,15 @@
       }
       enforceConfirmModalBlock();
     } finally {
+      // Reconnect observer after our changes are done
+      if (tradeBlockObserver) {
+        tradeBlockObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["disabled", "style", "class", "aria-disabled"],
+        });
+      }
       isEnforcingBlock = false;
     }
   }
@@ -925,7 +1012,7 @@
   function queueTradeBlockEnforce() {
     if (tradeBlockEnforceQueued || isEnforcingBlock) return;
     tradeBlockEnforceQueued = true;
-    queueMicrotask(() => {
+    requestAnimationFrame(() => {
       tradeBlockEnforceQueued = false;
       enforceTradeBlock();
     });
