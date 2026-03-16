@@ -50,6 +50,8 @@ async function refreshBalance() {
         const balance = response.accountValue;
         const hlBalanceEl = document.getElementById('hlBalance');
         if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(balance);
+        const hlValueEl = document.getElementById('hlBalanceHeader');
+        if (hlValueEl) hlValueEl.textContent = fmtUsd(balance);
 
         const warningEl = document.getElementById('lowBalanceWarning');
         const detailEl = document.getElementById('lowBalanceDetail');
@@ -423,6 +425,30 @@ function updateData() {
     refreshEvents();
 }
 
+// Truncate wallet address for inline header display: 0x34...1234
+function truncateAddress(address) {
+    if (!address || address.length < 8) return address;
+    return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+function showWalletCollapsed(address) {
+    const collapsed = document.getElementById('walletCollapsed');
+    const config = document.getElementById('walletConfig');
+    const display = document.getElementById('walletAddressDisplay');
+    if (display) display.textContent = truncateAddress(address);
+    if (collapsed) collapsed.style.display = 'flex';
+    if (config) config.style.display = 'none';
+}
+
+function showWalletExpanded() {
+    const collapsed = document.getElementById('walletCollapsed');
+    const config = document.getElementById('walletConfig');
+    const addressInput = document.getElementById('walletAddress');
+    if (collapsed) collapsed.style.display = 'none';
+    if (config) config.style.display = '';
+    if (addressInput) { addressInput.focus(); addressInput.select(); }
+}
+
 // Function to update status message
 function updateStatus(message, type = 'info') {
     const statusDiv = document.getElementById('notificationStatus');
@@ -586,14 +612,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     const addressInput = document.getElementById('walletAddress');
     const saveBtn = document.getElementById('walletSave');
     const walletStatus = document.getElementById('walletStatus');
+    const walletCollapsed = document.getElementById('walletCollapsed');
 
     storedAddress = await loadAddress();
-    if (storedAddress && addressInput) {
-        addressInput.value = storedAddress;
-        if (walletStatus) {
-            walletStatus.textContent = 'Connected';
-            walletStatus.className = 'wallet-status wallet-status--ok';
-        }
+    if (storedAddress) {
+        if (addressInput) addressInput.value = storedAddress;
+        showWalletCollapsed(storedAddress);
+    }
+
+    if (walletCollapsed) {
+        walletCollapsed.addEventListener('click', showWalletExpanded);
     }
 
     if (saveBtn) {
@@ -608,10 +636,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
             await saveAddress(val);
             storedAddress = val;
-            if (walletStatus) {
-                walletStatus.textContent = 'Saved';
-                walletStatus.className = 'wallet-status wallet-status--ok';
-            }
+            showWalletCollapsed(val);
             refreshBalance();
             refreshValidatorData();
             refreshTraderLimits();

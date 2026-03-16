@@ -6,23 +6,25 @@
     <title>Hyperscaled</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="popup.css">
+    <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
 </head>
 <body>
-    <div class="liquid-bg">
-        <div class="liquid-gradient"></div>
-        <div class="liquid-gradient"></div>
-        <div class="liquid-gradient"></div>
-    </div>
     <div class="container">
         <!-- Header -->
         <div class="header">
             <div class="logo">Hyper<b>scaled</b></div>
-            <div class="status-badge">In Challenge</div>
+            <div class="header-right">
+                <div id="walletCollapsed" class="wallet-inline" style="display: none;" title="Click to edit wallet address">
+                    <span id="walletAddressDisplay" class="wallet-inline-address">0x00...0000</span>
+                    <span id="hlBalanceHeader" class="wallet-inline-balance">$0.00</span>
+                </div>
+                <div class="status-badge">In Challenge</div>
+            </div>
         </div>
 
-        <!-- Wallet Config -->
+        <!-- Wallet Config (only shown on first run or when editing) -->
         <div id="walletConfig" class="wallet-config">
             <div class="wallet-config-header">
                 <span class="wallet-config-label">Wallet Address</span>
@@ -43,9 +45,9 @@
             </div>
         </div>
 
-        <!-- Account Balances -->
-        <div class="balance-grid">
-            <div class="balance-card balance-card--primary">
+        <!-- Account Balance -->
+        <div class="balance-card balance-card--primary">
+            <div class="balance-left">
                 <div class="balance-label">Funded Account</div>
                 <div class="balance-value"><span id="fundedBalance">--</span></div>
                 <div class="balance-change positive"><span id="fundedChange">--</span></div>
@@ -54,8 +56,9 @@
                 <div class="balance-label">HL Account</div>
                 <div class="balance-value balance-value--sm"><span id="hlBalance">--</span></div>
                 <div class="balance-change neutral">Live equity</div>
-            </div>
         </div>
+
+        <div class="section-divider"></div>
 
         <!-- Trading Capacity -->
         <div class="capacity-block">
@@ -114,11 +117,13 @@
             <div class="progress-label"><span id="drawdownLabel">--</span></div>
         </div>
 
+        <div class="section-divider"></div>
+
         <!-- Open Positions -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-title">Open Hyperscaled Positions</div>
-                <a href="#" class="view-link">View on HL →</a>
+            <div class="section-header section-header--positions">
+                <div class="section-title section-title--uppercase">Open Hyperscaled Positions</div>
+                <a href="#" class="view-link view-link--muted">View on HL →</a>
             </div>
             <div id="positionsContainer">
                 <div class="no-more-positions">Loading positions...</div>
