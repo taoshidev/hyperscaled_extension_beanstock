@@ -79,7 +79,7 @@
             <div class="hf-bar">
               <div class="hf-fill hf-fill--challenge" id="hf-fill-challenge" style="width:${challengePct}% !important"></div>
             </div>
-            <span class="hf-stat-val">${ACCOUNT.challengeCurrent}% <span class="hf-muted">/ ${ACCOUNT.challengeTarget}%</span></span>
+            <span class="hf-stat-val">${Math.round(ACCOUNT.challengeCurrent)}% <span class="hf-muted">/ ${ACCOUNT.challengeTarget}%</span></span>
           </div>
 
           <div class="hf-stat">
@@ -87,7 +87,7 @@
             <div class="hf-bar">
               <div class="hf-fill hf-fill--drawdown" id="hf-fill-drawdown" style="width:${drawdownPct}% !important"></div>
             </div>
-            <span class="hf-stat-val">${ACCOUNT.drawdownCurrent}% <span class="hf-muted">/ ${ACCOUNT.drawdownMax}%</span></span>
+            <span class="hf-stat-val">${Math.round(ACCOUNT.drawdownCurrent)}% <span class="hf-muted">/ ${ACCOUNT.drawdownMax}%</span></span>
           </div>
 
           <div class="hf-stat" id="hf-stat-cap">
