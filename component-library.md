@@ -404,3 +404,124 @@ All spacing in this UI uses a 4px base unit. Never hardcode pixel values for `ma
 ### Rule
 
 New components must use tokens from this scale. If a value falls between two tokens (e.g. 10px between `--space-2` and `--space-3`), round to the nearest token. Exception: fixed visual dimensions (bar heights, border radii, icon sizes) are not spacing and may use explicit values.
+
+---
+
+## Not Registered Screen
+
+A welcome/onboarding screen shown when no wallet address is saved. Contains a centered hero block and a wallet input card. Replaces the simpler wallet-config form with a more guided experience.
+
+### HTML structure
+
+```html
+<div id="walletConfig" class="screen-not-registered">
+    <div class="not-registered-hero">
+        <div class="not-registered-icon">⬡</div>
+        <div class="not-registered-title">Welcome to Hyperscaled</div>
+        <div class="not-registered-body">Enter your Hyperliquid wallet address...</div>
+    </div>
+    <div class="not-registered-card">
+        <div class="not-registered-card-header">
+            <span class="not-registered-label">Hyperliquid Wallet Address</span>
+            <span id="walletStatus" class="wallet-status"></span>
+        </div>
+        <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input wallet-input--full" spellcheck="false" />
+        <button id="walletSave" class="wallet-save-btn wallet-save-btn--full">Check</button>
+        <div class="not-registered-signup">
+            <span class="not-registered-signup-text">Not registered yet?</span>
+            <a href="https://hyperscaled.trade" target="_blank" class="not-registered-signup-link">Sign up at hyperscaled.trade →</a>
+        </div>
+    </div>
+</div>
+```
+
+### Tokens used
+
+| Element | Property | Token / Value |
+|---------|----------|---------------|
+| Screen layout | Padding / gap | `--space-4` / `--space-4` |
+| Hero padding-top | — | `--space-8` |
+| Icon | Color / size | `--accent` / 28px |
+| Title | Font / size / weight / color | `--font-ui` / 14px / 700 / `--text-strong` |
+| Body text | Font / size / color / line-height | `--font-ui` / 12px / `--text-body` / 1.7 |
+| Body max-width | — | 280px |
+| Card surface | Background / border | `--card-bg` / `--border-card` |
+| Card radius / padding | — | `--radius-card` / `--space-4` |
+| Input label | Font / size / weight / color | `--font-ui` / 11px / 600 / `--text-label` |
+| Input | Font / background / border / radius | `--font-mono` 12px / `--bg` / `--border-card` / `--radius-sm` |
+| Input padding | — | `--space-2` `--space-3` |
+| Input placeholder | Color | `--text-ghost` |
+| Button | Pattern | Ghost button (full-width variant) |
+| Signup text | Color / size | `--text-subtle` / 11px |
+| Signup link | Color / size | `--accent` / 11px |
+
+### Rules
+
+- The outer div retains `id="walletConfig"` for JS compatibility — the JS developer toggles this screen via `style.display`.
+- `walletAddress`, `walletSave`, and `walletStatus` IDs must never change — they are bound in popup.js.
+- The input uses `--bg` background (not `--input-bg`) to create a recessed effect inside the `--card-bg` card.
+- The icon (⬡) is the single teal accent element for this screen — no other element uses `--accent` at rest.
+
+---
+
+## Pending Screen
+
+A status screen shown when the wallet address is saved but no active challenge is found. Displays registration status with an amber progress indicator and placeholder registration details.
+
+### HTML structure
+
+```html
+<div id="pendingScreen" class="screen-pending" style="display: none;">
+    <div class="pending-status-card">
+        <div class="pending-icon">⏳</div>
+        <div class="pending-title">Registration Pending</div>
+        <div class="pending-body">Your payment was received...</div>
+        <div class="pending-progress-bar">
+            <div class="pending-progress-fill" style="width: 65%;"></div>
+        </div>
+        <div class="pending-sublabel">Awaiting validator confirmation...</div>
+    </div>
+    <div class="pending-details-card">
+        <div class="pending-details-title">Registration Details</div>
+        <div class="pending-detail-row">
+            <span class="pending-detail-key">Account Size</span>
+            <span class="pending-detail-value">--</span>
+        </div>
+        <!-- ... more rows ... -->
+        <div class="pending-detail-row pending-detail-row--last">
+            <span class="pending-detail-key">Entity Miner</span>
+            <span class="pending-detail-value">--</span>
+        </div>
+    </div>
+    <div class="pending-footer-note">You'll receive an email confirmation...</div>
+</div>
+```
+
+### Tokens used
+
+| Element | Property | Token / Value |
+|---------|----------|---------------|
+| Screen layout | Padding / gap | `--space-4` / `--space-3` |
+| Status card | Background / border / radius / padding | `--card-bg` / `--border-card` / `--radius-card` / `--space-5` |
+| Icon | Size | 24px |
+| Title | Font / size / weight / color | `--font-ui` / 14px / 700 / `--text-strong` |
+| Body | Font / size / color / line-height | `--font-ui` / 12px / `--text-body` / 1.7 |
+| Progress bar | Height / track / radius | 4px / `--bar-bg` / 5px |
+| Progress fill | Background | `--amber` (flat, no gradient) |
+| Progress spacing | margin-top | `--space-3` |
+| Sublabel | Color / size | `--amber` / 10px |
+| Details card | Background / border / radius / padding | `--card-bg-subtle` / `--border-card` / `--radius-card` / `--space-4` |
+| Details title | Font / size / weight / color / transform | `--font-ui` / 10px / 600 / `--text-label` / uppercase 0.08em |
+| Detail row | Padding / border | `--space-1` 0 / `--border-card` bottom |
+| Detail key | Color / size | `--text-subtle` / 12px |
+| Detail value | Color / size / weight | `--text-primary` / 12px / 600 |
+| Footer note | Color / size / line-height | `--text-ghost` / 11px / 1.6 |
+
+### Rules
+
+- Hidden by default (`style="display: none;"`). JS developer toggles visibility.
+- The progress bar uses 4px height — the thinnest in the system — to signal a transient status rather than a tracked metric.
+- Amber is used for both the progress fill and sublabel, consistent with the caution/waiting semantic.
+- The details card uses `--card-bg-subtle` (2% white) vs the status card's `--card-bg` (3% white) to establish visual hierarchy.
+- The last detail row uses `pending-detail-row--last` modifier to remove its bottom border.
+- All detail values are placeholder `--` text. The JS developer will add IDs or data-binding later.

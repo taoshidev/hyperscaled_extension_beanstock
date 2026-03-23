@@ -14,7 +14,7 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <div class="logo">Hyper<b>scaled</b></div>
+            <div class="logo"><img src="images/hyperscaled-logo.svg" alt="Hyperscaled" class="logo-icon"></div>
             <div class="header-right">
                 <div id="walletCollapsed" class="wallet-inline" style="display: none;" title="Click to edit wallet address">
                     <span id="walletAddressDisplay" class="wallet-inline-address">0x00...0000</span>
@@ -24,16 +24,62 @@
             </div>
         </div>
 
-        <!-- Wallet Config (only shown on first run or when editing) -->
-        <div id="walletConfig" class="wallet-config">
-            <div class="wallet-config-header">
-                <span class="wallet-config-label">Wallet Address</span>
-                <span id="walletStatus" class="wallet-status"></span>
+        <!-- Not Registered Screen (shown when no wallet address saved) -->
+        <div id="walletConfig" class="screen-not-registered">
+            <div class="not-registered-hero">
+                <div class="not-registered-icon">⬡</div>
+                <div class="not-registered-title">Welcome to Hyperscaled</div>
+                <div class="not-registered-body">Enter your Hyperliquid wallet address to check your challenge status. No wallet connection required — address only.</div>
             </div>
-            <div class="wallet-input-row">
-                <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input" spellcheck="false" />
-                <button id="walletSave" class="wallet-save-btn">Save</button>
+            <div class="not-registered-card">
+                <div class="not-registered-card-header">
+                    <span class="not-registered-label">Hyperliquid Wallet Address</span>
+                    <span id="walletStatus" class="wallet-status"></span>
+                </div>
+                <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input wallet-input--full" spellcheck="false" />
+                <button id="walletSave" class="wallet-save-btn wallet-save-btn--full">Check</button>
+                <div class="not-registered-signup">
+                    <span class="not-registered-signup-text">Not registered yet?</span>
+                    <a href="https://hyperscaled.trade" target="_blank" class="not-registered-signup-link">Sign up at hyperscaled.trade →</a>
+                </div>
             </div>
+        </div>
+
+        <!-- Pending Screen (shown when address saved but no active challenge) -->
+        <div id="pendingScreen" class="screen-pending" style="display: none;">
+            <div class="pending-status-card">
+                <div class="pending-icon">⏳</div>
+                <div class="pending-title">Registration Pending</div>
+                <div class="pending-body">Your payment was received. Vanta Network validators are confirming your registration. This typically takes 2–5 minutes.</div>
+                <div class="pending-progress-bar">
+                    <div class="pending-progress-fill" style="width: 65%;"></div>
+                </div>
+                <div class="pending-sublabel">Awaiting validator confirmation...</div>
+            </div>
+            <div class="pending-details-card">
+                <div class="pending-details-title">Registration Details</div>
+                <div class="pending-detail-row">
+                    <span class="pending-detail-key">Account Size</span>
+                    <span class="pending-detail-value">--</span>
+                </div>
+                <div class="pending-detail-row">
+                    <span class="pending-detail-key">Profit Target</span>
+                    <span class="pending-detail-value">--</span>
+                </div>
+                <div class="pending-detail-row">
+                    <span class="pending-detail-key">Max Drawdown</span>
+                    <span class="pending-detail-value">--</span>
+                </div>
+                <div class="pending-detail-row">
+                    <span class="pending-detail-key">Profit Split</span>
+                    <span class="pending-detail-value">--</span>
+                </div>
+                <div class="pending-detail-row pending-detail-row--last">
+                    <span class="pending-detail-key">Entity Miner</span>
+                    <span class="pending-detail-value">--</span>
+                </div>
+            </div>
+            <div class="pending-footer-note">You'll receive an email confirmation once registration is complete.</div>
         </div>
 
         <!-- Low Balance Warning -->

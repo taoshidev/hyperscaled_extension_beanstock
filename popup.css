@@ -139,10 +139,19 @@ body {
 }
 
 .logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 16px;
     font-weight: 400;
     color: var(--text-primary);
     letter-spacing: -0.32px;
+}
+
+.logo-icon {
+    height: 20px;
+    width: auto;
+    opacity: 0.9;
 }
 
 .logo b {
@@ -270,6 +279,242 @@ body {
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.36px;
     color: var(--text-primary);
+}
+
+/* ── Not Registered Screen ─────────────────────────── */
+.screen-not-registered {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-4);
+    gap: var(--space-4);
+}
+
+.not-registered-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding-top: var(--space-8);
+}
+
+.not-registered-icon {
+    font-size: 28px;
+    color: var(--accent);
+    margin-bottom: var(--space-2);
+}
+
+.not-registered-title {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-strong);
+    margin-bottom: var(--space-2);
+}
+
+.not-registered-body {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-body);
+    max-width: 280px;
+}
+
+.not-registered-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-card);
+    padding: var(--space-4);
+}
+
+.not-registered-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-2);
+}
+
+.not-registered-label {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-label);
+}
+
+.wallet-input--full {
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.wallet-input--full::placeholder {
+    color: var(--text-ghost);
+}
+
+.wallet-input--full:focus {
+    border-color: rgba(0, 198, 167, 0.4);
+}
+
+.wallet-save-btn--full {
+    width: 100%;
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: transparent;
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-sm);
+    color: var(--text-subtle);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.wallet-save-btn--full:hover {
+    border-color: var(--accent-border);
+    color: var(--text-primary);
+    background: transparent;
+}
+
+.not-registered-signup {
+    margin-top: var(--space-2);
+    text-align: center;
+}
+
+.not-registered-signup-text {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-subtle);
+}
+
+.not-registered-signup-link {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.not-registered-signup-link:hover {
+    opacity: 0.8;
+}
+
+/* ── Pending Screen ────────────────────────────────── */
+.screen-pending {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-4);
+    gap: var(--space-3);
+}
+
+.pending-status-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-card);
+    padding: var(--space-5);
+    text-align: center;
+}
+
+.pending-icon {
+    font-size: 24px;
+    margin-bottom: var(--space-2);
+}
+
+.pending-title {
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-strong);
+}
+
+.pending-body {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-body);
+    margin-top: var(--space-2);
+}
+
+.pending-progress-bar {
+    height: 4px;
+    background: var(--bar-bg);
+    border-radius: 5px;
+    overflow: hidden;
+    margin-top: var(--space-3);
+}
+
+.pending-progress-fill {
+    height: 100%;
+    background: var(--amber);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+.pending-sublabel {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--amber);
+    margin-top: var(--space-1);
+}
+
+.pending-details-card {
+    background: var(--card-bg-subtle);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-card);
+    padding: var(--space-4);
+}
+
+.pending-details-title {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: var(--space-2);
+}
+
+.pending-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--border-card);
+}
+
+.pending-detail-row--last {
+    border-bottom: none;
+}
+
+.pending-detail-key {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-subtle);
+}
+
+.pending-detail-value {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pending-footer-note {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-ghost);
+    text-align: center;
+    margin-top: var(--space-2);
 }
 
 /* ── Low Balance Warning ────────────────────────────── */

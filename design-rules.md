@@ -231,6 +231,30 @@ Configuration UI that is only needed once (or rarely) must not consume prime ver
 
 ---
 
+## Screen States
+
+The popup has three mutually exclusive screen states, toggled via `style.display` in JS:
+
+| State | Trigger | Visible sections | Hidden sections |
+|-------|---------|-----------------|-----------------|
+| **Not Registered** | No wallet address saved | Header + `#walletConfig` (not-registered screen) + Footer | Pending, all active-trading sections |
+| **Pending** | Address saved, no active challenge | Header + `#pendingScreen` + Footer | walletConfig, all active-trading sections |
+| **Active** | Address saved, active challenge found | Header + walletCollapsed + balance/capacity/challenge/drawdown/positions/events + Footer | walletConfig, pendingScreen |
+
+**Rule:** Screen toggling is JS-only via `style.display`. CSS defines the layout for each screen; JS owns the state machine. Never use CSS classes for screen visibility toggling.
+
+### Progress bar height encoding
+
+| Height | Use |
+|--------|-----|
+| 10px | Primary gauges (challenge progress, drawdown) — main metrics the trader monitors |
+| 6px | Capacity bars — utilization indicators |
+| 4px | Status indicators (pending confirmation) — secondary, non-interactive progress |
+
+**Note:** The pending status bar uses 4px as a deliberate distinction from the 5px secondary bar: it represents a transient waiting state, not a tracked metric. This is the thinnest bar in the hierarchy.
+
+---
+
 ## What This UI Should Never Have
 
 - Gradients used decoratively (the teal glow in `.container::before` is the only allowed ambient gradient)

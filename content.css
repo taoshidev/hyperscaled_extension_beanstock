@@ -92,12 +92,21 @@
 
 /* ── Brand ──────────────────────────────────────────────────────────────── */
 #hf-banner .hf-brand {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
   font-family: var(--font-ui) !important;
   font-size: 13px !important;
   font-weight: 800 !important;
   color: var(--text-primary) !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
+}
+
+#hf-banner .hf-brand-logo {
+  height: 22px !important;
+  width: auto !important;
+  opacity: 0.9 !important;
 }
 
 #hf-banner .hf-brand b {

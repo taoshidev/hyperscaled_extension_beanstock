@@ -88,7 +88,7 @@
     return `
       <div class="hf-bar">
         <!-- 1. Brand -->
-        <span class="hf-brand">Hyper<b>scaled</b></span>
+        <span class="hf-brand"><img src="${chrome.runtime.getURL('images/hyperscaled-logo.svg')}" alt="Hyperscaled" class="hf-brand-logo"></span>
 
         <!-- 2. Status badge -->
         <span class="hf-status-badge">● In Challenge</span>
