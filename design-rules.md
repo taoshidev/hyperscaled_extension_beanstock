@@ -125,7 +125,7 @@ Layered surfaces create depth without heavy shadows. Use the lowest opacity that
 | `--border-outer` | 8% white | Container border, stronger dividers |
 | `--bar-bg` | 6% white | Progress bar tracks |
 
-**Card usage rule:** Use cards for: Funded Account balance card (primary KPI), Position cards (grouped interactive data), Analytics link (navigational destination), Wallet Config form (first-run setup). Everything else — Trading Capacity, Challenge Progress, Drawdown — breathes directly on the background.
+**Card usage rule:** Use cards for: Funded Account balance card, HL Account balance card (2-column grid), Position cards (grouped interactive data), Next Payout card (navigational destination), Analytics link (navigational destination), Wallet Config form (first-run setup). Everything else — Trading Capacity, Challenge Progress, Drawdown — breathes directly on the background.
 
 **Never** add box-shadows to cards — depth comes from opacity layering only.
 
@@ -142,13 +142,12 @@ Layered surfaces create depth without heavy shadows. Use the lowest opacity that
 
 | Use | Font | Size | Weight | Notes |
 |-----|------|------|--------|-------|
-| Balance / KPI large | Menlo | 22px | 400 | tracking -0.44px, tabular-nums |
-| Balance secondary | Menlo | 18px | 400 | tracking -0.36px, tabular-nums |
-| Balance change / P&L delta | UI | 12px | 400 | `--green` or `--red` |
-| Section titles (Challenge Progress, Drawdown) | UI | 14px | 600 | `--text-strong` |
-| Section values (percentages, gauge readings) | Menlo | 13px | 600 | tabular-nums; challenge = `--accent`, drawdown = `--amber` |
-| Capacity title | UI | 14px | 600 | `--text-strong` |
-| Balance card label | UI | 11px | 400 | `--text-label`, line-height 16.5px |
+| Balance value | Menlo | 19px | 700 | tracking -0.38px, tabular-nums — both Funded and HL cards |
+| Payout value | Menlo | 18px | 700 | tracking -0.36px, tabular-nums, `--accent` |
+| Balance change / P&L delta | UI | 11px | 400 | `--green` or `--red` |
+| Section titles (Challenge Progress, Drawdown, Capacity) | UI | 12px | 600 | `--text-strong` |
+| Section values (percentages, gauge readings) | Menlo | 12px | 700 | tabular-nums; challenge = `--accent`, drawdown = `--amber` |
+| Balance card label | UI | 10px | 400 | `--text-label`, uppercase, letter-spacing 0.08em |
 | Body / misc | UI | 14px | 400 | |
 | Capacity footer values | UI | 11px | 400 | `--text-faint` |
 | Position PnL | UI | 12px | 600 | `--green` / `--red` |
@@ -158,7 +157,7 @@ Layered surfaces create depth without heavy shadows. Use the lowest opacity that
 ### Letter-spacing on KPIs
 
 Large monetary values use negative letter-spacing to feel precise and compact:
-- 22px values: `letter-spacing: -0.44px`
+- 19px values: `letter-spacing: -0.38px`
 - 18px values: `letter-spacing: -0.36px`
 
 Do not apply negative tracking to body text or labels.
@@ -200,8 +199,8 @@ Small pills (like "In Challenge", "LONG", "LOW BALANCE") use:
 - **Card padding:** `--space-3` compact · `--space-4` standard (position cards, balance cards)
 - **Inner gaps (flex):** `--space-2` (8px) for inline elements; `--space-1` (4px) for tight badge/icon pairs
 - **Section header margin-bottom:** `--space-2` (8px) — tight coupling between header and content
-- **Progress bar height:** `10px` primary gauges · `5px` secondary bars — height encodes informational rank
-- **Progress bar spacing:** `margin-top: --space-1` · `margin-bottom: --space-3`
+- **Progress bar height:** `7px` primary gauges (challenge, drawdown) · `5px` secondary bars (capacity) — height encodes informational rank
+- **Progress bar spacing:** `margin-top: --space-1` · `margin-bottom: --space-1`
 - **Border radius ladder:** `--radius-outer` (16px) → `--radius-card` (12px) → `--radius-sm` (8px) → 4–6px badges/inputs; `5px` progress bars (track and fill must match)
 
 ---
@@ -247,8 +246,8 @@ The popup has three mutually exclusive screen states, toggled via `style.display
 
 | Height | Use |
 |--------|-----|
-| 10px | Primary gauges (challenge progress, drawdown) — main metrics the trader monitors |
-| 6px | Capacity bars — utilization indicators |
+| 7px | Primary gauges (challenge progress, drawdown) — main metrics the trader monitors |
+| 5px | Capacity bars — utilization indicators |
 | 4px | Status indicators (pending confirmation) — secondary, non-interactive progress |
 
 **Note:** The pending status bar uses 4px as a deliberate distinction from the 5px secondary bar: it represents a transient waiting state, not a tracked metric. This is the thinnest bar in the hierarchy.

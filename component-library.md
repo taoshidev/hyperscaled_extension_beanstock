@@ -14,10 +14,10 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 <div class="capacity-block">
     <div class="capacity-header">
         <span class="capacity-title">Trading Capacity</span>
-        <span class="capacity-rule">62.5% / 125% LIMITS</span>
+        <span class="capacity-badge">62.5% / 125%</span>
     </div>
     <div class="capacity-bar">
-        <div class="capacity-fill" style="width: 11.4%;"></div>
+        <div class="capacity-fill capacity-fill--total" style="width: 11.4%;"></div>
     </div>
     <div class="capacity-footer">
         <span class="capacity-used">$234.50 used</span>
@@ -30,14 +30,17 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 
 | Element | Property | Token / Value |
 |---------|----------|---------------|
-| Title | Font size / weight | `14px / 600` |
+| Title | Font size / weight | `12px / 600` |
 | Title | Color | `--text-strong` |
-| Limits badge | Border | `--border-outer` |
-| Limits badge | Color | `--text-strong` |
-| Limits badge | Padding | `4px 8px` |
+| Limits badge | Border | `--border-card` |
+| Limits badge | Color | `--text-ghost` |
+| Limits badge | Padding | `2px 6px` |
+| Limits badge | Border radius | `4px` |
 | Bar track | Background | `--indigo-bg` |
-| Bar fill | Gradient | `linear-gradient(90deg, --indigo, #4041c8)` |
-| Bar height | — | `10px` |
+| Bar fill | Background | `--indigo` (flat, no gradient) |
+| Bar height | — | `5px` |
+| Bar radius | — | `5px` |
+| Bar spacing | — | `margin-top: --space-1`, `margin-bottom: --space-1` |
 | Footer labels | Color | `--text-faint` |
 | Footer labels | Font size | `11px` |
 
@@ -46,6 +49,7 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 - Never use teal or amber for this bar — indigo keeps capacity visually separate from P&L and challenge indicators.
 - Footer is always `$X used` left, `$X left` right. No "of $total" format.
 - Bar fill width is set inline via `style="width: XX%;"` calculated from JS.
+- Per-pair IDs are retained in a hidden div for JS compatibility.
 
 ---
 
@@ -59,7 +63,7 @@ A self-contained section displaying a single tracked metric with a title/value h
 <div class="section">
   <div class="section-header">
     <div class="section-title">Challenge Progress</div>
-    <div class="section-value">6.45% / 10%</div>
+    <div class="section-value challenge">6.45% / 10%</div>
   </div>
   <div class="progress-bar">
     <div class="progress-fill" style="width: 61.25%;"></div>
@@ -72,14 +76,14 @@ A self-contained section displaying a single tracked metric with a title/value h
 
 | Property | Token | Notes |
 |----------|-------|-------|
-| Section title color | `--text-strong` | 13px / 500 (UI font) — primary instrument label |
-| Section value color | `--text-body` | 12px / 500 (Menlo, tabular-nums) — primary reading |
-| Bar height | — | `10px` — never lower; this is a gauge, not a rule |
+| Section title | `--text-strong` | 12px / 600 (UI font) |
+| Section value | varies | 12px / 700 (Menlo, tabular-nums); `.challenge` = `--accent`, `.drawdown` = `--amber` |
+| Bar height | — | `7px` — primary gauge height |
 | Bar radius | — | `5px` track + fill (must match) |
-| Bar spacing | — | `margin-top: 4px`, `margin-bottom: 12px` |
+| Bar spacing | — | `margin-top: --space-1`, `margin-bottom: --space-1` |
 | Bar background | `--bar-bg` | |
 | Challenge fill | `--accent` | |
-| Sublabel color | `--text-faint` | |
+| Sublabel color | `--text-faint` | 11px, UI font |
 
 ### Variants
 
@@ -182,9 +186,10 @@ Position card PnL typography and color:
 
 | Property | Value |
 |----------|-------|
-| Font | `--font-ui` (Inter) |
-| Size | `12px` |
-| Weight | `600` |
+| Font | `--font-mono` (Menlo) |
+| Size | `14px` |
+| Weight | `700` |
+| Numeric | `tabular-nums` |
 
 | State | Class | Token |
 |-------|-------|-------|
@@ -273,6 +278,44 @@ No teal at any state. This button should read as infrastructure, not call-to-act
 
 ---
 
+## Balance Grid
+
+A 2-column grid displaying the Funded Account and HL Account as separate cards. Each card is a label/value/sublabel stack.
+
+### HTML structure
+
+```html
+<div class="balance-grid">
+    <div class="balance-card">
+        <div class="balance-label">Funded Account</div>
+        <div class="balance-value"><span id="fundedBalance">--</span></div>
+        <div class="balance-change positive"><span id="fundedChange">--</span></div>
+    </div>
+    <div class="balance-card">
+        <div class="balance-label">HL Account</div>
+        <div class="balance-value"><span id="hlBalance">--</span></div>
+        <div class="balance-sublabel">Live equity</div>
+    </div>
+</div>
+```
+
+### Tokens used
+
+| Element | Property | Token / Value |
+|---------|----------|---------------|
+| Grid | Layout | `grid-template-columns: 1fr 1fr`, `gap: --space-2` |
+| Card | Surface | `--card-bg` / `--border-card` / `--radius-card` |
+| Card | Padding | `--space-4` |
+| Label | Font / size / color | `--font-ui` / 10px / `--text-label` |
+| Label | Transform | uppercase, letter-spacing 0.08em |
+| Label | Spacing | `margin-bottom: --space-1` |
+| Value | Font / size / weight | `--font-mono` / 19px / 700 |
+| Value | Tracking | -0.38px, tabular-nums |
+| Change (positive) | Font / size / color | `--font-ui` / 11px / `--green` |
+| Sublabel | Font / size / color | `--font-ui` / 11px / `--text-ghost` |
+
+---
+
 ## Label / Value Pair
 
 A vertically stacked label-above-value pattern used wherever data is displayed: balance cards, position details, capacity rows. Uses `--font-mono` for all financial data.
@@ -296,14 +339,14 @@ A vertically stacked label-above-value pattern used wherever data is displayed: 
 
 | Element | Font | Size | Color token |
 |---------|------|------|-------------|
-| Label | Inter | 11px | `--text-label` |
-| Large value | Inter | 22px, tracking -0.44px | `--text-primary` |
-| Secondary value | Inter | 18px, tracking -0.36px | `--text-primary` |
-| Change — positive | Inter | 12px | `--green` |
-| Change — negative | Inter | 12px | `--red` |
-| Change — neutral | Inter | 12px | `--text-neutral` |
+| Label | UI | 10px | `--text-label` (uppercase, 0.08em tracking) |
+| Balance value | Menlo | 19px, tracking -0.38px | `--text-primary` |
+| Payout value | Menlo | 18px, tracking -0.36px | `--accent` |
+| Change — positive | UI | 11px | `--green` |
+| Change — negative | UI | 11px | `--red` |
+| Change — neutral | UI | 11px | `--text-neutral` |
 | Detail label | Menlo | 10px | `--text-dim` |
-| Detail value | Menlo | 10px | `--text-light` |
+| Detail value | Menlo | 10px | `--text-subtle` |
 
 ### Rule
 
@@ -370,6 +413,46 @@ A card that collapses to a single-line summary once the user has completed setup
 
 ---
 
+## Next Payout Card
+
+A card displaying the next payout amount with a navigation arrow. Interactive — cursor pointer with hover opacity.
+
+### HTML structure
+
+```html
+<div class="payout-card">
+    <div class="payout-content">
+        <div class="payout-left">
+            <div class="payout-label">Next Payout</div>
+            <div class="payout-value"><span id="payoutAmount">--</span></div>
+        </div>
+        <div class="payout-arrow">→</div>
+    </div>
+</div>
+```
+
+### Tokens used
+
+| Element | Property | Token / Value |
+|---------|----------|---------------|
+| Card | Surface | `--card-bg` / `--border-card` / `--radius-card` |
+| Card | Padding | `--space-4` |
+| Card | Interaction | `cursor: pointer`, hover opacity 0.85 |
+| Label | Font / size / color | `--font-ui` / 10px / `--text-label` |
+| Label | Transform | uppercase, letter-spacing 0.08em |
+| Label | Spacing | `margin-bottom: --space-1` |
+| Value | Font / size / weight | `--font-mono` / 18px / 700 |
+| Value | Color / tracking | `--accent` / -0.36px, tabular-nums |
+| Arrow | Color / size | `--accent` / 18px |
+
+### Rules
+
+- The payout card is always a card (never breathes on bg) — it's navigational.
+- The arrow is decorative and part of the click target.
+- The `payoutAmount` ID is reserved for JS data binding.
+
+---
+
 ## Spacing Tokens
 
 All spacing in this UI uses a 4px base unit. Never hardcode pixel values for `margin`, `padding`, `gap`, or `inset` — use the token scale.
@@ -390,13 +473,14 @@ All spacing in this UI uses a 4px base unit. Never hardcode pixel values for `ma
 
 | Component | Property | Token |
 |-----------|----------|-------|
-| `.position-card` | `padding` | `--space-4` |
-| `.capacity-block` | `padding` | `--space-3` |
+| `.position-card` | `padding` | `--space-3` |
+| `.payout-card` | `padding` | `--space-4` |
+| `.balance-card` | `padding` | `--space-4` |
 | `.wallet-config` | `padding` | `--space-3` |
 | `.section` | `margin-bottom` | `--space-3` |
 | `.section-header` | `margin-bottom` | `--space-2` |
 | `.progress-bar` | `margin-top` | `--space-1` |
-| `.progress-bar` | `margin-bottom` | `--space-3` |
+| `.progress-bar` | `margin-bottom` | `--space-1` |
 | `.wallet-collapsed` | `gap` | `--space-2` |
 | `.wallet-input-row` | `gap` | `--space-2` |
 | `.detail-grid` | `gap` | `--space-2` |
@@ -439,7 +523,7 @@ A welcome/onboarding screen shown when no wallet address is saved. Contains a ce
 
 | Element | Property | Token / Value |
 |---------|----------|---------------|
-| Screen layout | Padding / gap | `--space-4` / `--space-4` |
+| Screen layout | Gap | `--space-4` (no padding — inherits container padding) |
 | Hero padding-top | — | `--space-8` |
 | Icon | Color / size | `--accent` / 28px |
 | Title | Font / size / weight / color | `--font-ui` / 14px / 700 / `--text-strong` |

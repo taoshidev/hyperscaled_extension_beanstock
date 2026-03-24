@@ -285,8 +285,8 @@ body {
 .screen-not-registered {
     display: flex;
     flex-direction: column;
-    padding: var(--space-4);
     gap: var(--space-4);
+    margin-bottom: var(--space-3);
 }
 
 .not-registered-hero {
@@ -551,156 +551,108 @@ body {
     color: rgba(252, 165, 165, 0.8);
 }
 
-/* ── Balance Card ───────────────────────────────────── */
-.balance-card--primary {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    padding: 17px 15px;
-    background: var(--card-bg);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-sm);
-    margin-bottom: 14px;
+/* ── Balance Grid ───────────────────────────────────── */
+.balance-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
 }
 
-.balance-left {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.balance-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-card);
+    padding: var(--space-4);
 }
 
 .balance-label {
-    font-size: 11px;
-    color: var(--text-label);
+    font-size: 10px;
+    font-family: var(--font-ui);
     font-weight: 400;
-    line-height: 16.5px;
+    color: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: var(--space-1);
 }
 
 .balance-value {
-    font-size: 22px;
-    font-weight: 400;
+    font-size: 19px;
+    font-weight: 700;
     font-family: var(--font-mono);
-    letter-spacing: -0.44px;
+    letter-spacing: -0.38px;
     color: var(--text-primary);
-    line-height: 24px;
     font-variant-numeric: tabular-nums;
 }
 
 .balance-change {
-    font-size: 12px;
+    font-size: 11px;
+    font-family: var(--font-ui);
     font-weight: 400;
-    line-height: 18px;
-}
-
-.balance-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-}
-
-.balance-value--sm {
-    font-size: 18px;
+    margin-top: var(--space-1);
 }
 
 .balance-change.positive { color: var(--green); }
 .balance-change.negative { color: var(--red); }
 .balance-change.neutral  { color: var(--text-neutral); }
 
+.balance-sublabel {
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--text-ghost);
+    margin-top: var(--space-1);
+}
+
 /* ── Section Divider ────────────────────────────────── */
 .section-divider {
-    height: 1px;
-    background: var(--border-card);
-    margin-bottom: 14px;
+    display: none;
 }
 
 /* ── Trading Capacity ───────────────────────────────── */
 .capacity-block {
-    margin-bottom: 14px;
+    margin-bottom: var(--space-3);
 }
 
 .capacity-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .capacity-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-strong);
-}
-
-.capacity-rule {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     font-family: var(--font-ui);
     color: var(--text-strong);
-    border: 1px solid var(--border-outer);
-    padding: 4px 8px;
+}
+
+.capacity-badge {
+    font-size: 10px;
+    font-family: var(--font-ui);
+    color: var(--text-ghost);
+    border: 1px solid var(--border-card);
     border-radius: 4px;
-}
-
-.capacity-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.capacity-row-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 6px;
-}
-
-.capacity-label {
-    font-size: 11px;
-    color: var(--text-label);
-}
-
-.capacity-used {
-    font-size: 11px;
-    color: var(--text-body);
-    font-weight: 500;
-}
-
-.capacity-of {
-    font-weight: 400;
-    color: var(--text-neutral);
-}
-
-.capacity-bar-wrap {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    padding: 2px 6px;
 }
 
 .capacity-bar {
-    flex: 1;
-    height: 6px;
+    height: 5px;
     background: var(--indigo-bg);
-    border-radius: 3px;
+    border-radius: 5px;
     overflow: hidden;
+    margin-top: var(--space-1);
+    margin-bottom: var(--space-1);
 }
 
 .capacity-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 5px;
     transition: width 0.3s ease;
 }
 
 .capacity-fill--total {
-    background: linear-gradient(90deg, var(--indigo), #4041c8);
-}
-
-.capacity-remaining {
-    font-size: 11px;
-    color: var(--text-faint);
-    white-space: nowrap;
-    min-width: 72px;
-    text-align: right;
+    background: var(--indigo);
 }
 
 .capacity-footer {
@@ -709,27 +661,39 @@ body {
     align-items: center;
 }
 
+.capacity-used {
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--text-faint);
+}
+
+.capacity-remaining {
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--text-faint);
+}
+
 /* ── Sections ───────────────────────────────────────── */
 .section {
-    margin-bottom: 14px;
+    margin-bottom: var(--space-3);
 }
 
 .section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
 }
 
 .section-title {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
+    font-family: var(--font-ui);
     color: var(--text-strong);
 }
 
 .section-value {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     color: var(--text-body);
@@ -739,24 +703,26 @@ body {
 .section-value.drawdown  { color: var(--amber); }
 
 .view-link {
-    font-size: 12px;
-    color: var(--text-subtle);
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--accent);
     text-decoration: none;
-    transition: color 0.2s ease;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
 }
 
 .view-link:hover {
-    color: var(--accent);
+    opacity: 0.8;
 }
 
 /* ── Progress Bars ──────────────────────────────────── */
 .progress-bar {
-    height: 10px;
+    height: 7px;
     background: var(--bar-bg);
     border-radius: 5px;
     overflow: hidden;
-    margin-top: 4px;
-    margin-bottom: 12px;
+    margin-top: var(--space-1);
+    margin-bottom: var(--space-1);
 }
 
 .progress-fill {
@@ -781,60 +747,54 @@ body {
 
 /* ── Position Section Header ────────────────────────── */
 .section-header--positions {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .section-title--uppercase {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 400;
-    color: var(--text-muted);
+    font-family: var(--font-ui);
+    color: var(--text-label);
     text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-.view-link--muted {
-    font-size: 10px;
-    color: var(--text-muted);
-}
-
-.view-link--muted:hover {
-    color: var(--accent);
+    letter-spacing: 0.08em;
 }
 
 /* ── Position Card ──────────────────────────────────── */
 .position-card {
-    padding: 16px;
+    padding: var(--space-3);
     background: var(--card-bg);
     border: 1px solid var(--border-card);
     border-radius: var(--radius-card);
-    margin-bottom: 10px;
+    margin-bottom: var(--space-2);
+    cursor: pointer;
 }
 
 .position-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
 }
 
 .position-symbol {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .symbol-name {
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
     font-family: var(--font-mono);
     color: var(--text-primary);
 }
 
 .position-badge {
-    padding: 3px 6px;
+    padding: 2px 6px;
     border-radius: 4px;
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 700;
+    font-family: var(--font-ui);
+    text-transform: uppercase;
 }
 
 .position-badge.long {
@@ -850,20 +810,21 @@ body {
 }
 
 .position-pnl {
-    font-size: 12px;
-    font-weight: 600;
-    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     color: var(--text-primary);
 }
 
 .position-pnl.positive { color: var(--green); }
 .position-pnl.negative { color: var(--red); }
 
-/* ── Position Details (3-column) ────────────────────── */
+/* ── Position Details ───────────────────────────────── */
 .position-details {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+    gap: var(--space-3);
+    margin-top: var(--space-1);
 }
 
 .detail-col {
@@ -886,15 +847,96 @@ body {
 .detail-value {
     font-size: 10px;
     font-family: var(--font-mono);
-    color: var(--text-light);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-subtle);
     line-height: 15px;
 }
 
+/* Position badge row */
+.position-badge-row {
+    margin-top: var(--space-1);
+}
+
+/* Position footer (mirrored status + view link) */
+.position-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--space-2);
+    padding-top: var(--space-1);
+    border-top: 1px solid var(--border-card);
+}
+
+.position-mirror {
+    font-size: 10px;
+    font-family: var(--font-ui);
+    color: var(--accent);
+}
+
+.position-view-link {
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.position-view-link:hover {
+    opacity: 0.8;
+}
+
 .no-more-positions {
-    padding: 6px 0 2px;
+    padding: var(--space-4);
     text-align: center;
     font-size: 11px;
+    font-family: var(--font-ui);
     color: var(--text-ghost);
+}
+
+/* ── Next Payout Card ──────────────────────────────── */
+.payout-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-card);
+    padding: var(--space-4);
+    cursor: pointer;
+    margin-bottom: var(--space-3);
+    transition: opacity 0.15s ease;
+}
+
+.payout-card:hover {
+    opacity: 0.85;
+}
+
+.payout-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.payout-label {
+    font-size: 10px;
+    font-family: var(--font-ui);
+    font-weight: 400;
+    color: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: var(--space-1);
+}
+
+.payout-value {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.36px;
+    color: var(--accent);
+}
+
+.payout-arrow {
+    font-size: 18px;
+    color: var(--accent);
 }
 
 /* ── Event Cards ────────────────────────────────────── */

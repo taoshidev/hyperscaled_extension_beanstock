@@ -91,60 +91,25 @@
             </div>
         </div>
 
-        <!-- Account Balance -->
-        <div class="balance-card balance-card--primary">
-            <div class="balance-left">
+        <!-- Section 1: Account Balances (2-column grid) -->
+        <div class="balance-grid">
+            <div class="balance-card">
                 <div class="balance-label">Funded Account</div>
                 <div class="balance-value"><span id="fundedBalance">--</span></div>
                 <div class="balance-change positive"><span id="fundedChange">--</span></div>
             </div>
-            <div class="balance-right">
+            <div class="balance-card">
                 <div class="balance-label">HL Account</div>
-                <div class="balance-value balance-value--sm"><span id="hlBalance">--</span></div>
-                <div class="balance-change neutral">Live equity</div>
+                <div class="balance-value"><span id="hlBalance">--</span></div>
+                <div class="balance-sublabel">Live equity</div>
             </div>
         </div>
 
-        <div class="section-divider"></div>
-
-        <!-- Trading Capacity -->
-        <div class="capacity-block">
-            <div class="capacity-header">
-                <span class="capacity-title">Trading Capacity</span>
-            </div>
-            <div class="capacity-rows">
-                <div class="capacity-row">
-                    <div class="capacity-row-top">
-                        <span class="capacity-label">Per Pair Limit</span>
-                        <span class="capacity-used"><span id="perPairUsed">--</span> <span class="capacity-of">of</span> <span id="perPairMax">--</span></span>
-                    </div>
-                    <div class="capacity-bar-wrap">
-                        <div class="capacity-bar">
-                            <div class="capacity-fill capacity-fill--total" id="perPairFill" style="width: 0%;"></div>
-                        </div>
-                        <span class="capacity-remaining"><span id="perPairRemaining">--</span> left</span>
-                    </div>
-                </div>
-                <div class="capacity-row">
-                    <div class="capacity-row-top">
-                        <span class="capacity-label">Portfolio Total</span>
-                        <span class="capacity-used"><span id="capacityUsed">--</span> <span class="capacity-of">of</span> <span id="capacityMax">--</span></span>
-                    </div>
-                    <div class="capacity-bar-wrap">
-                        <div class="capacity-bar">
-                            <div class="capacity-fill capacity-fill--total" id="capacityFill" style="width: 0%;"></div>
-                        </div>
-                        <span class="capacity-remaining"><span id="capacityRemaining">--</span> left</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Challenge Progress -->
+        <!-- Section 2: Challenge Progress -->
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Challenge Progress</div>
-                <div class="section-value"><span id="challengeValue">--</span></div>
+                <div class="section-value challenge"><span id="challengeValue">--</span></div>
             </div>
             <div class="progress-bar">
                 <div class="progress-fill" id="challengeFill" style="width: 0%;"></div>
@@ -152,7 +117,7 @@
             <div class="progress-label"><span id="challengeLabel">--</span></div>
         </div>
 
-        <!-- Max Drawdown -->
+        <!-- Section 3: Current Drawdown -->
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Current Drawdown</div>
@@ -164,16 +129,46 @@
             <div class="progress-label"><span id="drawdownLabel">--</span></div>
         </div>
 
-        <div class="section-divider"></div>
+        <!-- Section 4: Trading Capacity -->
+        <div class="capacity-block">
+            <div class="capacity-header">
+                <span class="capacity-title">Trading Capacity</span>
+                <span class="capacity-badge"><span id="perPairMax">--</span> / <span id="capacityMax">--</span></span>
+            </div>
+            <div class="capacity-bar">
+                <div class="capacity-fill capacity-fill--total" id="capacityFill" style="width: 0%;"></div>
+            </div>
+            <div class="capacity-footer">
+                <span class="capacity-used"><span id="capacityUsed">--</span> used</span>
+                <span class="capacity-remaining"><span id="capacityRemaining">--</span> left</span>
+            </div>
+            <!-- Per-pair data retained for JS compatibility -->
+            <div style="display:none;">
+                <span id="perPairUsed">--</span>
+                <div id="perPairFill" style="width: 0%;"></div>
+                <span id="perPairRemaining">--</span>
+            </div>
+        </div>
 
-        <!-- Open Positions -->
+        <!-- Section 5: Open Positions -->
         <div class="section">
             <div class="section-header section-header--positions">
-                <div class="section-title section-title--uppercase">Open Hyperscaled Positions</div>
-                <a href="#" class="view-link view-link--muted">View on HL →</a>
+                <div class="section-title section-title--uppercase">Open Positions</div>
+                <a href="#" class="view-link">View all →</a>
             </div>
             <div id="positionsContainer">
                 <div class="no-more-positions">Loading positions...</div>
+            </div>
+        </div>
+
+        <!-- Section 6: Next Payout -->
+        <div class="payout-card">
+            <div class="payout-content">
+                <div class="payout-left">
+                    <div class="payout-label">Next Payout</div>
+                    <div class="payout-value"><span id="payoutAmount">--</span></div>
+                </div>
+                <div class="payout-arrow">→</div>
             </div>
         </div>
 
