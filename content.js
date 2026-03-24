@@ -65,6 +65,12 @@
     return 'var(--accent)';
   }
 
+  function ddBadgeState(val) {
+    if (val >= 5) return { label: 'Breached', cls: 'hf-dd-panel-badge--red' };
+    if (val >= 4) return { label: 'Warning', cls: 'hf-dd-panel-badge--amber' };
+    return { label: 'Safe', cls: 'hf-dd-panel-badge--accent' };
+  }
+
   function ddWarn(val) {
     return val >= 4 ? ' ⚠' : '';
   }
@@ -73,6 +79,72 @@
     if (val >= 10) return 'var(--accent)';
     if (val >= 8) return 'var(--amber)';
     return 'var(--indigo)';
+  }
+
+  function wireDdPanel(banner) {
+    const trigger = banner.querySelector('#hf-dd-trigger');
+    const panel = banner.querySelector('#hf-dd-panel');
+    if (!trigger || !panel) return;
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = panel.classList.contains('hf-dd-panel--open');
+      panel.classList.toggle('hf-dd-panel--open', !isOpen);
+
+      // Position panel aligned to trigger
+      const triggerRect = trigger.getBoundingClientRect();
+      const bannerRect = banner.getBoundingClientRect();
+      panel.style.left = (triggerRect.left - bannerRect.left) + 'px';
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+      if (!panel.contains(e.target) && !trigger.contains(e.target)) {
+        panel.classList.remove('hf-dd-panel--open');
+      }
+    });
+  }
+
+  function updateDdPanel() {
+    const daily = ACCOUNT.daily_loss_pct || 0;
+    const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
+    const equity = ACCOUNT.hlBalance || 0;
+
+    // Daily badge
+    const dailyBadge = document.getElementById('hf-dd-daily-badge');
+    if (dailyBadge) {
+      const ds = ddBadgeState(daily);
+      dailyBadge.textContent = ds.label;
+      dailyBadge.className = 'hf-dd-panel-badge ' + ds.cls;
+    }
+
+    // Trailing badge
+    const trailingBadge = document.getElementById('hf-dd-trailing-badge');
+    if (trailingBadge) {
+      const ts = ddBadgeState(trailing);
+      trailingBadge.textContent = ts.label;
+      trailingBadge.className = 'hf-dd-panel-badge ' + ts.cls;
+    }
+
+    // Daily column values
+    const dayOpen = document.getElementById('hf-dd-day-open');
+    if (dayOpen) dayOpen.textContent = fmt(equity);
+    const dailyBreach = document.getElementById('hf-dd-daily-breach');
+    if (dailyBreach) dailyBreach.textContent = fmt(equity * 0.95);
+    const dailyLoss = document.getElementById('hf-dd-daily-loss');
+    if (dailyLoss) dailyLoss.textContent = fmt(equity * daily / 100) + ' (' + daily.toFixed(2) + '%)';
+    const dailyBuffer = document.getElementById('hf-dd-daily-buffer');
+    if (dailyBuffer) dailyBuffer.textContent = fmt(equity * (5 - daily) / 100);
+
+    // Trailing column values
+    const hwm = document.getElementById('hf-dd-hwm');
+    if (hwm) hwm.textContent = fmt(equity);
+    const trailingBreach = document.getElementById('hf-dd-trailing-breach');
+    if (trailingBreach) trailingBreach.textContent = fmt(equity * 0.95);
+    const trailingLoss = document.getElementById('hf-dd-trailing-loss');
+    if (trailingLoss) trailingLoss.textContent = fmt(equity * trailing / 100) + ' (' + trailing.toFixed(2) + '%)';
+    const trailingBuffer = document.getElementById('hf-dd-trailing-buffer');
+    if (trailingBuffer) trailingBuffer.textContent = fmt(equity * (5 - trailing) / 100);
   }
 
   function getBannerHTML() {
@@ -105,8 +177,8 @@
         <!-- 5. Divider -->
         <span class="hf-divider"></span>
 
-        <!-- 6. Daily / Trailing stacked -->
-        <div class="hf-dd-stack">
+        <!-- 6. Daily / Trailing stacked (clickable → dropdown) -->
+        <div class="hf-dd-stack hf-dd-trigger" id="hf-dd-trigger">
           <div class="hf-dd-row">
             <span class="hf-dd-label">DAILY</span>
             <span class="hf-dd-value" id="hf-daily" style="color:${ddColor(daily)} !important">${daily.toFixed(2)}%</span>
@@ -118,6 +190,51 @@
             <span class="hf-dd-value" id="hf-trailing" style="color:${ddColor(trailing)} !important">${trailing.toFixed(2)}%</span>
             <span class="hf-dd-suffix">/ 5.00%</span>
             ${trailing >= 4 ? `<span class="hf-dd-warn" style="color:${ddColor(trailing)} !important">⚠</span>` : ''}
+          </div>
+        </div>
+
+        <!-- Drawdown Rules dropdown panel -->
+        <div class="hf-dd-panel" id="hf-dd-panel">
+          <div class="hf-dd-panel-header">
+            <div class="hf-dd-panel-title">Drawdown Rules</div>
+            <div class="hf-dd-panel-sub">Two independent drawdown rules — breaching either results in immediate disqualification.</div>
+          </div>
+          <div class="hf-dd-panel-grid">
+            <div class="hf-dd-panel-col">
+              <div class="hf-dd-panel-col-header">
+                <span class="hf-dd-panel-dot" style="background:var(--indigo) !important"></span>
+                <span class="hf-dd-panel-col-title">RULE 1 — DAILY LOSS LIMIT (5.00%)</span>
+                <span class="hf-dd-panel-badge" id="hf-dd-daily-badge">Safe</span>
+              </div>
+              <div class="hf-dd-panel-rows">
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Day open equity</span><span class="hf-dd-panel-val" id="hf-dd-day-open">${fmt(equity)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-daily-breach">${fmt(equity * 0.95)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Current loss</span><span class="hf-dd-panel-val" id="hf-dd-daily-loss">${fmt(equity * daily / 100)} (${daily.toFixed(2)}%)</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-daily-buffer">${fmt(equity * (5 - daily) / 100)}</span></div>
+              </div>
+              <div class="hf-dd-panel-note">Checked intraday in real-time. Resets 00:00 UTC.</div>
+            </div>
+            <div class="hf-dd-panel-col">
+              <div class="hf-dd-panel-col-header">
+                <span class="hf-dd-panel-dot" style="background:var(--amber) !important"></span>
+                <span class="hf-dd-panel-col-title">RULE 2 — EOD TRAILING LOSS LIMIT (5.00%)</span>
+                <span class="hf-dd-panel-badge" id="hf-dd-trailing-badge">Safe</span>
+              </div>
+              <div class="hf-dd-panel-rows">
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">EOD high water mark</span><span class="hf-dd-panel-val" id="hf-dd-hwm">${fmt(equity)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-trailing-breach">${fmt(equity * 0.95)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Drawdown from HWM</span><span class="hf-dd-panel-val" id="hf-dd-trailing-loss">${fmt(equity * trailing / 100)} (${trailing.toFixed(2)}%)</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-trailing-buffer">${fmt(equity * (5 - trailing) / 100)}</span></div>
+              </div>
+              <div class="hf-dd-panel-note">Checked at end of day. HWM trails upward with equity gains.</div>
+            </div>
+          </div>
+          <div class="hf-dd-panel-footer">
+            <span>Trading day resets 00:00 UTC</span>
+            <span class="hf-dd-panel-sep">|</span>
+            <span>Daily = intraday real-time</span>
+            <span class="hf-dd-panel-sep">|</span>
+            <span>Trailing = checked at EOD</span>
           </div>
         </div>
 
@@ -149,9 +266,6 @@
 
         <!-- 11. Spacer -->
         <span class="hf-spacer"></span>
-
-        <!-- 12. Rules button (stubbed) -->
-        <span class="hf-rules-btn">● Rules</span>
       </div>
 
       <!-- Disabled sub-strip -->
@@ -195,6 +309,9 @@
       e.preventDefault();
       window.open("https://vanta.network/dashboard", "_blank");
     });
+
+    // Wire drawdown dropdown toggle
+    wireDdPanel(banner);
 
     startBindingLoop();
     scheduleUpdate();
@@ -535,6 +652,12 @@
       e.preventDefault();
       window.open("https://vanta.network/dashboard", "_blank");
     });
+
+    // Re-wire drawdown dropdown
+    wireDdPanel(banner);
+
+    // Update panel data
+    updateDdPanel();
 
     updateBanner(getPendingNotional());
   }

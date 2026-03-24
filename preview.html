@@ -82,7 +82,7 @@
 
     <span class="hf-divider"></span>
 
-    <div class="hf-dd-stack" id="hf-dd-stack">
+    <div class="hf-dd-stack hf-dd-trigger" id="hf-dd-trigger">
       <div class="hf-dd-row">
         <span class="hf-dd-label">DAILY</span>
         <span class="hf-dd-value" id="hf-daily" style="color:var(--accent) !important">1.23%</span>
@@ -92,6 +92,51 @@
         <span class="hf-dd-label">TRAILING</span>
         <span class="hf-dd-value" id="hf-trailing" style="color:var(--accent) !important">2.10%</span>
         <span class="hf-dd-suffix">/ 5.00%</span>
+      </div>
+    </div>
+
+    <!-- Drawdown Rules dropdown panel -->
+    <div class="hf-dd-panel" id="hf-dd-panel">
+      <div class="hf-dd-panel-header">
+        <div class="hf-dd-panel-title">Drawdown Rules</div>
+        <div class="hf-dd-panel-sub">Two independent drawdown rules — breaching either results in immediate disqualification.</div>
+      </div>
+      <div class="hf-dd-panel-grid">
+        <div class="hf-dd-panel-col">
+          <div class="hf-dd-panel-col-header">
+            <span class="hf-dd-panel-dot" style="background:var(--indigo) !important"></span>
+            <span class="hf-dd-panel-col-title">RULE 1 — DAILY LOSS LIMIT (5.00%)</span>
+            <span class="hf-dd-panel-badge hf-dd-panel-badge--accent">Safe</span>
+          </div>
+          <div class="hf-dd-panel-rows">
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Day open equity</span><span class="hf-dd-panel-val">$12,847.32</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red">$12,204.95</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Current loss</span><span class="hf-dd-panel-val">$158.02 (1.23%)</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent">$484.35</span></div>
+          </div>
+          <div class="hf-dd-panel-note">Checked intraday in real-time. Resets 00:00 UTC.</div>
+        </div>
+        <div class="hf-dd-panel-col">
+          <div class="hf-dd-panel-col-header">
+            <span class="hf-dd-panel-dot" style="background:var(--amber) !important"></span>
+            <span class="hf-dd-panel-col-title">RULE 2 — EOD TRAILING LOSS LIMIT (5.00%)</span>
+            <span class="hf-dd-panel-badge hf-dd-panel-badge--accent">Safe</span>
+          </div>
+          <div class="hf-dd-panel-rows">
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">EOD high water mark</span><span class="hf-dd-panel-val">$12,847.32</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red">$12,204.95</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Drawdown from HWM</span><span class="hf-dd-panel-val">$269.79 (2.10%)</span></div>
+            <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent">$372.57</span></div>
+          </div>
+          <div class="hf-dd-panel-note">Checked at end of day. HWM trails upward with equity gains.</div>
+        </div>
+      </div>
+      <div class="hf-dd-panel-footer">
+        <span>Trading day resets 00:00 UTC</span>
+        <span class="hf-dd-panel-sep">|</span>
+        <span>Daily = intraday real-time</span>
+        <span class="hf-dd-panel-sep">|</span>
+        <span>Trailing = checked at EOD</span>
       </div>
     </div>
 
@@ -117,7 +162,6 @@
     <span class="hf-disabled-msg" id="hf-disabled-msg"><svg class="hf-icon-disabled" width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="2"/><line x1="3.5" y1="3.5" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="2"/></svg> Daily loss limit hit — trading paused</span>
 
     <span class="hf-spacer"></span>
-    <span class="hf-rules-btn">● Rules</span>
   </div>
 
   <div class="hf-sub-strip">
@@ -256,6 +300,24 @@ function setState(mode) {
             disabledDiv.style.setProperty('display', 'none', 'important');
             break;
     }
+}
+
+// Wire DD panel toggle for preview
+const ddTrigger = document.getElementById('hf-dd-trigger');
+const ddPanel = document.getElementById('hf-dd-panel');
+if (ddTrigger && ddPanel) {
+  ddTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ddPanel.classList.toggle('hf-dd-panel--open');
+    const rect = ddTrigger.getBoundingClientRect();
+    const bannerRect = document.getElementById('hf-banner').getBoundingClientRect();
+    ddPanel.style.left = (rect.left - bannerRect.left) + 'px';
+  });
+  document.addEventListener('click', (e) => {
+    if (!ddPanel.contains(e.target) && !ddTrigger.contains(e.target)) {
+      ddPanel.classList.remove('hf-dd-panel--open');
+    }
+  });
 }
 </script>
 </body>

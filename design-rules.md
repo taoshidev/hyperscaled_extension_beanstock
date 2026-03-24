@@ -267,6 +267,45 @@ All progress bars use a uniform `10px` height for visual consistency. No height-
 
 ---
 
+## Banner Dropdown Panel
+
+The injected banner's Daily/Trailing stat group is clickable and opens a dropdown panel with detailed drawdown rules.
+
+### Trigger
+- `.hf-dd-trigger` on the `.hf-dd-stack` element
+- `cursor: pointer`, `opacity: 0.75` on hover, `0.15s ease` transition
+- Click toggles `.hf-dd-panel--open` on the panel; clicking outside dismisses
+
+### Panel surface
+| Property | Value |
+|----------|-------|
+| Position | `absolute`, `top: 38px` (below bar), left-aligned to trigger |
+| Background | `#13161A` (slightly lighter than `--bg`) |
+| Border | `1px solid --border-card`, no top border (visually attaches to bar) |
+| Border-radius | `0 0 --radius-card --radius-card` (bottom corners only) |
+| Padding | `--space-4` |
+| Width | `560px` |
+| Shadow | `0 16px 40px rgba(0,0,0,0.7)` |
+| z-index | `999998` (one below banner) |
+
+### Layout
+- `display: grid`, `grid-template-columns: 1fr 1fr`, `gap: --space-3`
+- Header (full-width): title `--text-strong` 14px 700, subtitle `--text-subtle` 11px
+- Each column: dot (8px circle, indigo or amber) + uppercase title + status badge
+- 4 data rows per column: key `--text-subtle` 12px, value `--font-mono` 12px 600 tabular-nums
+- Footer (full-width): `--text-ghost` 10px, separator `|` at 0.3 opacity
+
+### Status badges
+| State | Color | Background | Border |
+|-------|-------|------------|--------|
+| Safe | `--accent` | `--accent-bg` | `--accent-border` |
+| Warning | `--amber` | `rgba(255,185,0,0.10)` | `rgba(255,185,0,0.20)` |
+| Breached | `--red` | `--danger-bg` | `--danger-border` |
+
+**Rule:** Badge state is derived from the drawdown percentage: < 4% = Safe, 4–5% = Warning, >= 5% = Breached. Same thresholds as `ddColor()`.
+
+---
+
 ## What This UI Should Never Have
 
 - Gradients used decoratively (the teal glow in `.container::before` is the only allowed ambient gradient)
@@ -274,5 +313,5 @@ All progress bars use a uniform `10px` height for visual consistency. No height-
 - Heavy drop shadows (`box-shadow` on cards)
 - Rounded corners larger than `--radius-outer` (16px)
 - Bold colors on more than one element in the same card/section
-- Emoji used as decoration (only acceptable in functional states: ⚠️ warning, 🔔 notification)
+- Emoji used in the UI — use inline SVG icons instead (⚠ warning icon is the only remaining text symbol, acceptable in data contexts)
 - Font sizes below 10px or above 22px in the popup UI
