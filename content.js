@@ -46,8 +46,8 @@
   const LAYOUT_STYLE_ID = "hf-layout-fix";
   const BANNER_HEIGHT = 38;
 
-  const MAX_SINGLE = () => Math.min(ACCOUNT.maxPositionPerPair || ACCOUNT.fundedSize, ACCOUNT.fundedSize);
-  const MAX_TOTAL = () => Math.min(ACCOUNT.maxPortfolio || ACCOUNT.fundedSize, ACCOUNT.fundedSize);
+  const MAX_SINGLE = () => ACCOUNT.maxPositionPerPair || ACCOUNT.fundedSize;
+  const MAX_TOTAL = () => ACCOUNT.maxPortfolio || ACCOUNT.fundedSize;
 
   const fmt = (n) =>
     "$" +
