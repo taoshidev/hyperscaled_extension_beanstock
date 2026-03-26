@@ -226,6 +226,7 @@
   height: 5px !important;
   border-radius: 5px !important;
   transition: width 0.2s ease, background-color 0.2s ease !important;
+  width: var(--hf-target-pct, 0%) !important;
 }
 
 #hf-banner .hf-target-value {

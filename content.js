@@ -154,7 +154,7 @@
     const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
     const target = ACCOUNT.challengeCurrent || 0;
     const targetMax = ACCOUNT.challengeTarget || 10;
-    const targetPct = targetMax > 0 ? Math.min((target / targetMax) * 100, 100) : 0;
+    const targetPct = targetMax > 0 ? Math.max(0, Math.min((target / targetMax) * 100, 100)) : 0;
     const equity = ACCOUNT.hlBalance || 0;
     const isDisabled = shouldBlockTrade;
     const isWarning = daily >= 4 || trailing >= 4;
@@ -246,10 +246,10 @@
         <!-- 8. Target -->
         <div class="hf-stat-group">
           <span class="hf-stat-label">TARGET</span>
-          <div class="hf-target-bar">
-            <div class="hf-target-fill" id="hf-target-fill" style="width:${targetPct}% !important; background-color:${targetColor(target)} !important"></div>
+          <div class="hf-target-bar" style="--hf-target-pct:${targetPct}%">
+            <div class="hf-target-fill" id="hf-target-fill" style="background-color:${targetColor(target)} !important"></div>
           </div>
-          <span class="hf-target-value" id="hf-target-val" style="color:${targetColor(target)} !important">${target.toFixed(1)}%</span>
+          <span class="hf-target-value" id="hf-target-val" style="color:${targetColor(target)} !important">${target.toFixed(2)}%</span>
           <span class="hf-target-suffix">/ ${targetMax}%</span>
         </div>
 
