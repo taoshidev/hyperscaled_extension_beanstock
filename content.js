@@ -619,7 +619,7 @@
 
       ACCOUNT.fundedSize = result.account_size || 0;
 
-      // Compute PnL % from positions — API returns {positions: {positions: [...]}}
+      // Positions are already transformed: {positions: [...]}
       const positionsRaw = result.positions;
       const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
       console.log("[Hyperscaled] Validator data loaded, account_size:", ACCOUNT.fundedSize, "positions:", positions.length);
@@ -633,30 +633,31 @@
       for (const pos of openPositions) {
         const notional = pos.net_leverage != null
           ? Math.abs(parseFloat(pos.net_leverage)) * ACCOUNT.fundedSize
-          : (pos.orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
+          : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
         const pnl = (parseFloat(pos.current_return) || 0) * ACCOUNT.fundedSize;
 
         totalUnrealizedPnl += pnl;
         totalNotional += notional;
         if (notional > maxSingleNotional) maxSingleNotional = notional;
 
-        // Extract coin from trade_pair array: ["DOGEUSD", "DOGE/USD", ...]
-        const tp = pos.trade_pair || [];
-        const coin = (typeof tp === "string" ? tp : (tp[0] || "")).replace(/USD[CT]?$/, "").toUpperCase();
+        // Extract coin from trade_pair string (e.g. "BTC/USD")
+        const tp = pos.trade_pair || "";
+        const coin = (typeof tp === "string" ? tp : (tp[0] || "")).replace(/\/.*$/, "").replace(/USD[CT]?$/, "").toUpperCase();
         if (coin) {
           notionalByPair[coin] = (notionalByPair[coin] || 0) + notional;
         }
       }
       ACCOUNT.notionalByPair = notionalByPair;
 
-      // Challenge & drawdown from API challenge_progress
-      const cp = result.challenge_progress || {};
-      ACCOUNT.challengeCurrent = parseFloat(cp.returns_percent) || 0;
-      ACCOUNT.challengeTarget = parseFloat(cp.target_return_percent) || ACCOUNT.challengeTarget;
-      ACCOUNT.drawdownCurrent = parseFloat(cp.drawdown_percent) || 0;
-      ACCOUNT.drawdownMax = parseFloat(cp.drawdown_limit_percent) || ACCOUNT.drawdownMax;
-      ACCOUNT.daily_loss_pct = parseFloat(cp.daily_loss_percent) || 0;
-      ACCOUNT.eod_trailing_loss_pct = parseFloat(cp.eod_trailing_loss_percent) || 0;
+      // Challenge & drawdown from API (new response shape)
+      const dd = result.drawdown || {};
+      const currentEquity = parseFloat(dd.current_equity) || 1;
+      ACCOUNT.challengeCurrent = (currentEquity - 1) * 100;
+      // target_return_percent no longer provided; keep existing default
+      ACCOUNT.drawdownCurrent = parseFloat(dd.intraday_drawdown_pct) || 0;
+      ACCOUNT.drawdownMax = parseFloat(dd.intraday_threshold_pct) || ACCOUNT.drawdownMax;
+      ACCOUNT.daily_loss_pct = parseFloat(dd.intraday_drawdown_pct) || 0;
+      ACCOUNT.eod_trailing_loss_pct = parseFloat(dd.eod_drawdown_pct) || 0;
 
       ACCOUNT.openTotalUsed = totalNotional;
       ACCOUNT.openSingleUsed = maxSingleNotional;

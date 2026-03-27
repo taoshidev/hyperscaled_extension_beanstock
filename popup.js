@@ -80,7 +80,7 @@ async function refreshValidatorData() {
         }
 
         const accountSize = result.account_size || 0;
-        // API returns {positions: {positions: [...]}} — unwrap nested structure
+        // Positions are already transformed: {positions: [...]}
         const positionsRaw = result.positions;
         const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
         const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
@@ -91,11 +91,9 @@ async function refreshValidatorData() {
         let maxSingleNotional = 0;
 
         for (const pos of openPositions) {
-            // Notional from net_leverage * accountSize, or sum of order values
             const notional = pos.net_leverage != null
                 ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
-                : (pos.orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
-            // PnL from current_return (decimal) * accountSize
+                : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
             const pnl = (parseFloat(pos.current_return) || 0) * accountSize;
 
             totalUnrealizedPnl += pnl;
@@ -103,17 +101,19 @@ async function refreshValidatorData() {
             if (notional > maxSingleNotional) maxSingleNotional = notional;
         }
 
-        // Challenge progress from API
-        const cp = result.challenge_progress || {};
-        const returnsPct = parseFloat(cp.returns_percent) || 0;
-        const targetPct = parseFloat(cp.target_return_percent) || CHALLENGE_TARGET;
-        const challengeCompletionPct = parseFloat(cp.challenge_completion_percent) || 0;
-        const inChallenge = cp.in_challenge_period ?? false;
+        // Challenge status from API
+        const cp = result.challenge_period || {};
+        const dd = result.drawdown || {};
+        const currentEquity = parseFloat(dd.current_equity) || 1;
+        const returnsPct = (currentEquity - 1) * 100;
+        const targetPct = CHALLENGE_TARGET;
+        const challengeCompletionPct = targetPct > 0 ? Math.min((returnsPct / targetPct) * 100, 100) : 0;
+        const inChallenge = !!cp.bucket && cp.bucket.includes('CHALLENGE');
 
         // Drawdown from API
-        const drawdownPct = parseFloat(cp.drawdown_percent) || 0;
-        const drawdownLimitPct = parseFloat(cp.drawdown_limit_percent) || DRAWDOWN_MAX;
-        const drawdownUsagePct = parseFloat(cp.drawdown_usage_percent) || 0;
+        const drawdownPct = parseFloat(dd.intraday_drawdown_pct) || 0;
+        const drawdownLimitPct = parseFloat(dd.intraday_threshold_pct) || DRAWDOWN_MAX;
+        const drawdownUsagePct = parseFloat(dd.intraday_usage_pct) || 0;
 
         // Funded balance
         const fundedBalanceEl = document.getElementById('fundedBalance');
@@ -239,26 +239,25 @@ function renderPositions(positions, accountSize) {
     }
 
     container.innerHTML = positions.map(pos => {
-        // trade_pair is an array: ["DOGEUSD", "DOGE/USD", fee1, fee2, maxLev]
-        const tp = pos.trade_pair || [];
+        // trade_pair is now a string like "BTC/USD"
+        const tp = pos.trade_pair || '';
         const displayPair = typeof tp === 'string' ? tp : (tp[1] || tp[0] || 'UNKNOWN');
         const symbol = typeof tp === 'string' ? tp.replace(/\/.*$/, '') : ((tp[0] || '').replace(/USD[CT]?$/, '') || 'UNKNOWN');
 
-        // Direction & leverage from net_leverage or last order
-        const lastOrder = pos.orders?.[pos.orders.length - 1];
+        // Direction & leverage from net_leverage or position_type
         const netLev = parseFloat(pos.net_leverage);
-        const isLong = !isNaN(netLev) ? netLev > 0 : (lastOrder?.order_type === 'LONG');
+        const isLong = !isNaN(netLev) ? netLev > 0 : (pos.position_type === 'LONG');
         const direction = isLong ? 'LONG' : 'SHORT';
         const badgeClass = isLong ? 'long' : 'short';
-        const leverage = !isNaN(netLev) ? Math.abs(netLev).toFixed(2) + 'x' : (lastOrder?.leverage ? parseFloat(lastOrder.leverage).toFixed(2) + 'x' : '--');
+        const leverage = !isNaN(netLev) && netLev !== 0 ? Math.abs(netLev).toFixed(2) + 'x' : '--';
 
-        // Value
+        // Value from leverage * account size
         const value = !isNaN(netLev)
             ? Math.abs(netLev) * (accountSize || 0)
-            : Math.abs(parseFloat(lastOrder?.value) || 0);
+            : 0;
 
-        // Entry price from first order
-        const entryPx = parseFloat(pos.orders?.[0]?.price) || 0;
+        // Entry price from average_entry_price
+        const entryPx = parseFloat(pos.average_entry_price) || 0;
 
         // PnL from current_return (decimal) * accountSize
         const pnl = (parseFloat(pos.current_return) || 0) * (accountSize || 0);

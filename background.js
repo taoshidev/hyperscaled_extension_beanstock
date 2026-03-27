@@ -557,11 +557,89 @@ async function fetchTraderLimits(address) {
   return res.json();
 }
 
+// Transform the new /hl-traders/<address> response into a flat shape
+function transformTraderResponse(raw) {
+  const d = raw.dashboard || {};
+  const info = d.subaccount_info || {};
+  const acctData = d.account_size_data || null;
+  const dd = d.drawdown || null;
+  const cp = d.challenge_period || null;
+  const elim = d.elimination || null;
+  const accountSize = acctData?.account_size ?? info.account_size ?? 0;
+
+  // Convert positions from { uuid: {tp, t, o, r, ap, ...} } map to array
+  let positions = null;
+  if (d.positions) {
+    const posMap = d.positions.positions || {};
+    const posArray = Object.entries(posMap).map(([uuid, p]) => ({
+      position_uuid: uuid,
+      trade_pair: p.tp,
+      position_type: p.t,
+      open_ms: p.o,
+      current_return: p.r,
+      average_entry_price: p.ap,
+      realized_pnl: p.rp,
+      net_leverage: p.nl || 0,
+      close_ms: p.c || null,
+      return_at_close: p.rc || null,
+      is_closed_position: !!p.c,
+      filled_orders: p.fo
+        ? Object.entries(p.fo).map(([oid, o]) => ({
+            order_uuid: oid,
+            order_type: o.t,
+            value: o.v,
+            execution_type: o.e,
+            processed_ms: o.p,
+            leverage: o.l,
+            price: o.pr,
+          }))
+        : [],
+    }));
+
+    positions = {
+      positions: posArray,
+      positions_time_ms: d.positions.positions_time_ms,
+      all_time_returns: d.positions.all_time_returns,
+      total_leverage: d.positions.total_leverage,
+    };
+  }
+
+  // Compute convenience drawdown fields (thresholds are fractions → pct)
+  let drawdown = null;
+  if (dd) {
+    const intradayThresholdPct = (dd.intraday_drawdown_threshold || 0) * 100;
+    const eodThresholdPct = (dd.eod_drawdown_threshold || 0) * 100;
+    drawdown = {
+      ...dd,
+      intraday_threshold_pct: intradayThresholdPct,
+      eod_threshold_pct: eodThresholdPct,
+      intraday_usage_pct: intradayThresholdPct > 0 ? (dd.intraday_drawdown_pct / intradayThresholdPct) * 100 : 0,
+      eod_usage_pct: eodThresholdPct > 0 ? (dd.eod_drawdown_pct / eodThresholdPct) * 100 : 0,
+    };
+  }
+
+  return {
+    status: raw.status,
+    timestamp: raw.timestamp,
+    synthetic_hotkey: info.synthetic_hotkey,
+    account_size: accountSize,
+    hl_address: info.hl_address,
+    payout_address: info.payout_address,
+    subaccount_status: info.status,
+    challenge_period: cp,
+    drawdown,
+    elimination: elim,
+    account_size_data: acctData,
+    positions,
+  };
+}
+
 // Fetch trader data from validator endpoint
 async function fetchValidatorData(address) {
   const res = await fetch(`${VALIDATOR_URL}/hl-traders/${address}`);
   if (!res.ok) throw new Error(`Validator API error ${res.status}`);
-  return res.json();
+  const raw = await res.json();
+  return transformTraderResponse(raw);
 }
 
 // Fetch account state from Hyperliquid API (perps + spot)
