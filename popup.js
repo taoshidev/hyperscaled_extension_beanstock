@@ -151,7 +151,7 @@ async function refreshValidatorData() {
         const drawdownValueEl = document.getElementById('drawdownValue');
         const drawdownFillEl = document.getElementById('drawdownFill');
         const drawdownLabelEl = document.getElementById('drawdownLabel');
-        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownUsagePct.toFixed(1)}% / ${drawdownLimitPct.toFixed(0)}%`;
+        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownPct.toFixed(3)}% / ${drawdownLimitPct.toFixed(0)}%`;
         if (drawdownFillEl) {
             drawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
             drawdownFillEl.style.background = drawdownUsagePct > 80 ? 'var(--red)' : drawdownUsagePct > 50 ? 'var(--amber)' : '';
