@@ -13,6 +13,42 @@
   marker.style.display = "none";
   (document.documentElement || document.body).appendChild(marker);
 
+  // ── Recover completed registration from background verification ──────────
+  // Fires after a short delay to ensure React has mounted its listeners
+  setTimeout(() => {
+    chrome.storage.local.get(["hlPaymentResult"], (stored) => {
+      const result = stored.hlPaymentResult;
+      if (!result || !result.completedAt) return;
+      // Only honour results from the last 30 minutes
+      if (Date.now() - result.completedAt > 30 * 60 * 1000) {
+        chrome.storage.local.remove(["hlPaymentResult"]);
+        return;
+      }
+      // Write to page localStorage so registration-flow can recover on reload
+      try {
+        window.localStorage.setItem(
+          "hs_registration_result",
+          JSON.stringify(result)
+        );
+      } catch {}
+      // Dispatch event for live React listeners
+      document.dispatchEvent(
+        new CustomEvent("HYPERSCALED_PAYMENT_STATUS", {
+          detail: {
+            status: result.success ? "registered" : "registration_error",
+            txHash: result.txHash || "",
+            hlAddress: result.hlAddress || "",
+            registrationStatus: result.registrationStatus || "",
+            tierName: result.tierName || "",
+            accountSize: result.accountSize || 0,
+            error: result.error || null,
+          },
+        })
+      );
+      chrome.storage.local.remove(["hlPaymentResult"]);
+    });
+  }, 1500);
+
   // ── Page → Extension (via window.postMessage) ─────────────────────────────
 
   window.addEventListener("message", (event) => {
