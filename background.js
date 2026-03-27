@@ -691,6 +691,7 @@ async function fetchHLBalance(address) {
 
   return {
     accountValue,
+    perpAccountValue,
     perpsValue,
     spotUSDC,
     totalMarginUsed: parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0,

@@ -2,6 +2,7 @@ let storedAddress = null;
 const TEST_MODE = false;
 let traderLimits = null;
 let refreshIntervalId = null;
+let hlBalance = 0;
 
 // Safe wrapper for chrome.runtime.sendMessage — silently fails if context is gone
 function safeSendMessage(msg) {
@@ -46,11 +47,9 @@ async function refreshBalance() {
     try {
         const response = await safeSendMessage({ action: 'fetchBalance', address: storedAddress });
 
-        const balance = response.accountValue;
+        hlBalance = response.perpAccountValue || response.accountValue;
         const hlBalanceEl = document.getElementById('hlBalance');
-        if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(balance);
-        const hlValueEl = document.getElementById('hlBalanceHeader');
-        if (hlValueEl) hlValueEl.textContent = fmtUsd(balance);
+        if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(hlBalance);
 
     } catch (e) {
         console.error('Balance fetch failed:', e);
@@ -97,19 +96,22 @@ async function refreshValidatorData() {
         const cp = result.challenge_period || {};
         const dd = result.drawdown || {};
         const currentEquity = parseFloat(dd.current_equity) || 1;
+        const validatorEquity = accountSize * currentEquity;
         const returnsPct = (currentEquity - 1) * 100;
         const targetPct = CHALLENGE_TARGET;
         const challengeCompletionPct = targetPct > 0 ? Math.min((returnsPct / targetPct) * 100, 100) : 0;
-        const inChallenge = !!cp.bucket && cp.bucket.includes('CHALLENGE');
+        const inChallenge = cp.bucket !== 'SUBACCOUNT_FUNDED';
 
         // Drawdown from API
         const drawdownPct = parseFloat(dd.intraday_drawdown_pct) || 0;
         const drawdownLimitPct = parseFloat(dd.intraday_threshold_pct) || DRAWDOWN_MAX;
         const drawdownUsagePct = parseFloat(dd.intraday_usage_pct) || 0;
 
-        // Funded balance
+        // Funded balance (current equity from validator: account_size * current_equity)
         const fundedBalanceEl = document.getElementById('fundedBalance');
-        if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(accountSize);
+        if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(validatorEquity);
+        const hlBalanceHeaderEl = document.getElementById('hlBalanceHeader');
+        if (hlBalanceHeaderEl) hlBalanceHeaderEl.textContent = fmtUsd(validatorEquity);
 
         // Funded change
         const fundedChangeEl = document.getElementById('fundedChange');
@@ -160,8 +162,8 @@ async function refreshValidatorData() {
             drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer (${bufferPct.toFixed(2)}%)`;
         }
 
-        // Capacity — per pair
-        const maxPerPair = (traderLimits && traderLimits.max_position_per_pair_usd) ? parseFloat(traderLimits.max_position_per_pair_usd) : accountSize * 0.625;
+        // Capacity — per pair (based on HL available balance)
+        const maxPerPair = hlBalance * 0.625;
         const largestPairNotional = maxSingleNotional;
         const perPairUsedEl = document.getElementById('perPairUsed');
         const perPairMaxEl = document.getElementById('perPairMax');
@@ -175,8 +177,8 @@ async function refreshValidatorData() {
         }
         if (perPairRemainingEl) perPairRemainingEl.textContent = fmtUsd(Math.max(maxPerPair - largestPairNotional, 0));
 
-        // Capacity — portfolio total
-        const maxTotal = (traderLimits && traderLimits.max_portfolio_usd) ? parseFloat(traderLimits.max_portfolio_usd) : accountSize * 1.25;
+        // Capacity — portfolio total (based on HL available balance)
+        const maxTotal = hlBalance * 1.25;
         const capacityUsedEl = document.getElementById('capacityUsed');
         const capacityMaxEl = document.getElementById('capacityMax');
         const capacityFillEl = document.getElementById('capacityFill');

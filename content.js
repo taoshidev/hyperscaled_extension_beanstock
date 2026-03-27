@@ -23,6 +23,7 @@
 
   const ACCOUNT = {
     hlBalance: 0,
+    hlEquity: 0,
     fundedSize: 0,
     challengeTarget: 10,
     challengeCurrent: 0,
@@ -34,6 +35,7 @@
     eod_usage_pct: 0,
     intraday_threshold_pct: 5,
     eod_threshold_pct: 5,
+    validatorEquity: 0,
     openSingleUsed: 0,
     openTotalUsed: 0,
     maxPositionPerPair: 0,
@@ -53,8 +55,54 @@
   const LAYOUT_STYLE_ID = "hf-layout-fix";
   const BANNER_HEIGHT = 38;
 
-  const MAX_SINGLE = () => ACCOUNT.maxPositionPerPair || ACCOUNT.fundedSize;
-  const MAX_TOTAL = () => ACCOUNT.maxPortfolio || ACCOUNT.fundedSize;
+  // Open exposure from the validator uses program dollars (net_leverage × funded size).
+  // Caps must use the same basis — not Hyperliquid wallet equity, which is usually smaller.
+  function marginLimitBasisUsd() {
+    return ACCOUNT.hlEquity;
+  }
+
+  function perPositionLeverageCap() {
+    return ACCOUNT.inChallenge ? 0.625 : 2.5;
+  }
+
+  function totalPositionLeverageCap() {
+    return ACCOUNT.inChallenge ? 1.25 : 5;
+  }
+
+  function resolveChallengeModeFromValidator(result) {
+    const candidates = [
+      result?.challenge_period?.bucket,
+      result?.challenge_period?.status,
+      result?.subaccount_status,
+      result?.account_size_data?.status,
+    ]
+      .filter((v) => typeof v === "string")
+      .map((v) => v.toUpperCase());
+
+    if (candidates.some((v) => v.includes("FUNDED"))) return false;
+    if (candidates.some((v) => v.includes("CHALLENGE") || v.includes("EVAL"))) return true;
+
+    // Unknown shape: keep prior mode to avoid accidental flips.
+    return ACCOUNT.inChallenge;
+  }
+
+  function effectiveMaxSingleUsd() {
+    const modeCap = marginLimitBasisUsd() * perPositionLeverageCap();
+    if (limitsLoaded && ACCOUNT.maxPositionPerPair > 0) {
+      // Keep backend limits as an optional stricter ceiling.
+      return Math.min(modeCap, ACCOUNT.maxPositionPerPair);
+    }
+    return modeCap;
+  }
+
+  function effectiveMaxTotalUsd() {
+    const modeCap = marginLimitBasisUsd() * totalPositionLeverageCap();
+    if (limitsLoaded && ACCOUNT.maxPortfolio > 0) {
+      // Keep backend limits as an optional stricter ceiling.
+      return Math.min(modeCap, ACCOUNT.maxPortfolio);
+    }
+    return modeCap;
+  }
 
   const fmt = (n) =>
     "$" +
@@ -121,7 +169,7 @@
     const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
     const intradayLimit = ACCOUNT.intraday_threshold_pct || 5;
     const eodLimit = ACCOUNT.eod_threshold_pct || 5;
-    const equity = ACCOUNT.hlBalance || 0;
+    const equity = ACCOUNT.validatorEquity || 0;
 
     // Daily badge
     const dailyBadge = document.getElementById('hf-dd-daily-badge');
@@ -170,7 +218,7 @@
     const target = ACCOUNT.challengeCurrent || 0;
     const targetMax = ACCOUNT.challengeTarget || 10;
     const targetPct = targetMax > 0 ? Math.max(0, Math.min((target / targetMax) * 100, 100)) : 0;
-    const equity = ACCOUNT.hlBalance || 0;
+    const equity = ACCOUNT.validatorEquity || 0;
     const isDisabled = shouldBlockTrade;
     const isWarning = dailyUsage > 80 || trailingUsage > 80;
 
@@ -665,13 +713,13 @@
       ACCOUNT.isRegistered = true;
       ACCOUNT.registrationChecked = true;
 
-      // Challenge status from API
-      const cp = result.challenge_period || {};
-      ACCOUNT.inChallenge = !!cp.bucket && cp.bucket.includes('CHALLENGE');
+      // Challenge/funded status from API (robust to schema/value changes)
+      ACCOUNT.inChallenge = resolveChallengeModeFromValidator(result);
 
       // Challenge & drawdown from API (new response shape)
       const dd = result.drawdown || {};
       const currentEquity = parseFloat(dd.current_equity) || 1;
+      ACCOUNT.validatorEquity = ACCOUNT.fundedSize * currentEquity;
       ACCOUNT.challengeCurrent = (currentEquity - 1) * 100;
       // target_return_percent no longer provided; keep existing default
       ACCOUNT.drawdownCurrent = parseFloat(dd.intraday_drawdown_pct) || 0;
@@ -757,6 +805,7 @@
       console.log("[Hyperscaled] Balance result:", result);
       currentBalance = result.accountValue;
       ACCOUNT.hlBalance = currentBalance;
+      ACCOUNT.hlEquity = result.perpAccountValue || currentBalance;
       balanceVerified = true;
 
       updateBannerBalance();
@@ -767,17 +816,7 @@
   }
 
   function updateBannerBalance() {
-    const equityEl = document.getElementById("hf-equity");
-    const hwmEl = document.getElementById("hf-hwm");
-
-    if (equityEl && currentBalance !== null) {
-      equityEl.textContent = fmt(currentBalance);
-    }
-    if (hwmEl && currentBalance !== null) {
-      hwmEl.textContent = fmt(currentBalance);
-    }
-
-    // Re-apply state classes
+    // Re-apply state classes only — equity is driven by validator data (ACCOUNT.validatorEquity)
     const banner = document.getElementById(BANNER_ID);
     if (banner) applyBannerStateClasses(banner);
   }
@@ -812,6 +851,7 @@
       // Immediately clear stale account data so the banner doesn't show
       // the old wallet's numbers while the new fetch is in flight.
       ACCOUNT.hlBalance = 0;
+      ACCOUNT.hlEquity = 0;
       ACCOUNT.fundedSize = 0;
       ACCOUNT.challengeCurrent = 0;
       ACCOUNT.drawdownCurrent = 0;
@@ -930,7 +970,200 @@
   }
 
   function isSizeInput(input) {
+    if (!(input instanceof HTMLInputElement)) return false;
     return !!input.closest('[data-testid="sz-input"]');
+  }
+
+  function isLikelySizeInput(input) {
+    if (!(input instanceof HTMLInputElement)) return false;
+    if (isSizeInput(input)) return true;
+
+    const hint = (
+      (input.placeholder || "") + " " + (input.getAttribute("aria-label") || "")
+    ).toLowerCase();
+    if (hint.includes("qty") || hint.includes("quantity") || hint.includes("size") || hint.includes("amount")) {
+      return true;
+    }
+
+    const name = (input.name || "").toLowerCase();
+    if (name.includes("qty") || name.includes("quantity") || name.includes("size") || name.includes("amount")) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function isLiveEditableInput(input) {
+    return (
+      input instanceof HTMLInputElement &&
+      input.isConnected &&
+      !input.disabled &&
+      input.offsetParent !== null
+    );
+  }
+
+  const CLAMP_DEBUG = (() => {
+    try {
+      return window.HF_CLAMP_DEBUG === true || localStorage.getItem("hf_clamp_debug") === "1";
+    } catch (_) {
+      return window.HF_CLAMP_DEBUG === true;
+    }
+  })();
+
+  function clampDebug(event, details = {}) {
+    if (!CLAMP_DEBUG) return;
+    console.log("[Hyperscaled][ClampDebug]", event, details);
+  }
+
+  function describeInput(input) {
+    if (!(input instanceof HTMLInputElement)) {
+      return { kind: "none" };
+    }
+    return {
+      className: (input.className || "").trim(),
+      name: input.name || "",
+      placeholder: input.placeholder || "",
+      value: input.value,
+      connected: input.isConnected,
+      active: input === document.activeElement,
+      inSizeContainer: !!input.closest('[data-testid="sz-input"]'),
+      wrapperClass: (input.closest(".sc-fEXmlR")?.className || "").trim(),
+    };
+  }
+
+  function inputContextSignature(input) {
+    if (!(input instanceof HTMLInputElement)) return { className: "", wrapperClass: "" };
+    return {
+      className: (input.className || "").trim(),
+      wrapperClass: (input.closest(".sc-fEXmlR")?.className || "").trim(),
+    };
+  }
+
+  function withinTolerance(a, b, toleranceBase = Math.max(Math.abs(b) * 0.001, 1e-6)) {
+    return Math.abs(a - b) <= toleranceBase;
+  }
+
+  function pickBestClampTarget(preferredInput, originalValue) {
+    const allInputs = Array.from(document.querySelectorAll("input")).filter(isLiveEditableInput);
+    if (!allInputs.length) return null;
+
+    const preferred = isLiveEditableInput(preferredInput) ? preferredInput : null;
+    const active = isLiveEditableInput(document.activeElement) ? document.activeElement : null;
+    const edited = isLiveEditableInput(lastEditedInput) ? lastEditedInput : null;
+    const reference = preferred || active || edited || null;
+    const referenceSig = inputContextSignature(reference);
+    const tolerance = Math.max(Math.abs(originalValue) * 0.001, 1e-6);
+
+    let best = null;
+    let bestScore = -Infinity;
+    for (const input of allInputs) {
+      let score = 0;
+      if (preferred && input === preferred) score += 120;
+      if (active && input === active) score += 90;
+      if (edited && input === edited) score += 70;
+
+      const sig = inputContextSignature(input);
+      if (referenceSig.className && sig.className === referenceSig.className) score += 40;
+      if (referenceSig.wrapperClass && sig.wrapperClass === referenceSig.wrapperClass) score += 35;
+      if (isLikelySizeInput(input)) score += 20;
+
+      const current = parseNumber(input.value);
+      if (withinTolerance(current, originalValue, tolerance)) score += 25;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = input;
+      }
+    }
+    return best;
+  }
+
+  function resolveLiveSizeInput(preferredInput = null) {
+    if (isLiveEditableInput(preferredInput)) return preferredInput;
+    if (isLiveEditableInput(lastEditedInput)) return lastEditedInput;
+    if (isLiveEditableInput(document.activeElement) && isLikelySizeInput(document.activeElement)) {
+      return document.activeElement;
+    }
+
+    const sizeContainer = document.querySelector('[data-testid="sz-input"]');
+    if (sizeContainer) {
+      const sizeInputs = Array.from(sizeContainer.querySelectorAll("input"));
+      for (const input of sizeInputs) {
+        if (isLiveEditableInput(input)) return input;
+      }
+    }
+
+    const inputs = Array.from(document.querySelectorAll("input"));
+    for (const input of inputs) {
+      if (isLiveEditableInput(input) && isLikelySizeInput(input)) return input;
+    }
+    return null;
+  }
+
+  function scheduleClampReconcile(preferredInput, originalValue, expectedFormatted, expectedNumeric) {
+    const contextSig = inputContextSignature(preferredInput);
+    const reconcileDelays = [16, 48, 120, 220];
+    const expectedTolerance = Math.max(Math.abs(expectedNumeric) * 0.001, 1e-6);
+
+    let closed = false;
+    let observer = null;
+
+    const tryWrite = (phase, delayMs) => {
+      if (closed) return;
+      const target = pickBestClampTarget(preferredInput, originalValue);
+      if (!target) {
+        clampDebug("reconcile-no-target", { phase, delayMs, contextSig });
+        return;
+      }
+      const before = target.value;
+      const beforeNum = parseNumber(before);
+      const alreadySet = withinTolerance(beforeNum, expectedNumeric, expectedTolerance);
+      clampDebug("reconcile-target", {
+        phase,
+        delayMs,
+        selected: describeInput(target),
+        expectedFormatted,
+        expectedNumeric,
+        before,
+        beforeNum,
+        alreadySet,
+      });
+      if (alreadySet) {
+        closed = true;
+        if (observer) observer.disconnect();
+        return;
+      }
+      setInputValue(target, expectedNumeric, { reason: `reconcile:${phase}` });
+    };
+
+    for (const delayMs of reconcileDelays) {
+      setTimeout(() => tryWrite("timer", delayMs), delayMs);
+    }
+
+    observer = new MutationObserver(() => {
+      requestAnimationFrame(() => tryWrite("mutation", -1));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    setTimeout(() => {
+      closed = true;
+      if (observer) observer.disconnect();
+    }, 350);
+  }
+
+  function applyClampedSize(preferredInput, originalValue, clampedValue) {
+    const target = pickBestClampTarget(preferredInput, originalValue) || resolveLiveSizeInput(preferredInput);
+    if (!target) return { formatted: "", input: null };
+    clampDebug("clamp-selected-input", {
+      originalValue,
+      clampedValue,
+      selected: describeInput(target),
+      active: describeInput(document.activeElement),
+      lastEdited: describeInput(lastEditedInput),
+    });
+    const formatted = setInputValue(target, clampedValue, { reason: "initial-clamp" }) || "";
+    scheduleClampReconcile(target, originalValue, formatted, clampedValue);
+    return { formatted, input: target };
   }
 
   // Track the input the user is actively editing
@@ -995,10 +1228,7 @@
   }
 
   // ── React-compatible input value setter ──────────────────────────────────────
-  function setInputValue(input, value) {
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype, 'value'
-    ).set;
+  function setInputValue(input, value, debugMeta = null) {
     let formatted;
     if (value <= 0) {
       formatted = '';
@@ -1011,8 +1241,109 @@
         formatted = parseFloat(value.toFixed(6)).toString();
       }
     }
+
+    const valueMatches = () => {
+      const target = parseNumber(formatted);
+      const current = parseNumber(input.value);
+      const tolerance = Math.max(Math.abs(target) * 0.001, 1e-6);
+      return Math.abs(current - target) <= tolerance;
+    };
+
+    const emitChanges = () => {
+      try {
+        input.dispatchEvent(new InputEvent('beforeinput', {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+          inputType: 'insertReplacementText',
+          data: formatted,
+        }));
+      } catch (_) {}
+      try {
+        input.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          composed: true,
+          inputType: 'insertReplacementText',
+          data: formatted,
+        }));
+      } catch (_) {
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      }
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    };
+
+    const scheduleRevertProbe = (label) => {
+      if (!CLAMP_DEBUG) return;
+      const checks = [0, 16, 64, 180];
+      for (const delayMs of checks) {
+        setTimeout(() => {
+          const connected = input.isConnected;
+          const currentValue = connected ? input.value : "<detached>";
+          const expected = formatted;
+          const reverted = !connected || currentValue !== expected;
+          clampDebug("clamp-write-probe", {
+            label,
+            delayMs,
+            reverted,
+            expected,
+            currentValue,
+            connected,
+            target: describeInput(input),
+          });
+        }, delayMs);
+      }
+    };
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype, 'value'
+    ).set;
+    const previous = input.value;
+    clampDebug("clamp-write-before", {
+      meta: debugMeta || null,
+      before: previous,
+      formatted,
+      target: describeInput(input),
+    });
     nativeSetter.call(input, formatted);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const tracker = input._valueTracker;
+    if (tracker && typeof tracker.setValue === "function") {
+      tracker.setValue(previous);
+    }
+    emitChanges();
+    if (valueMatches()) {
+      clampDebug("clamp-write-after", { meta: debugMeta || null, stage: "native", after: input.value });
+      scheduleRevertProbe("native");
+      return formatted;
+    }
+
+    input.focus();
+    try {
+      input.setSelectionRange(0, input.value.length);
+      input.setRangeText(formatted, 0, input.value.length, "end");
+    } catch (_) {}
+    emitChanges();
+    if (valueMatches()) {
+      clampDebug("clamp-write-after", { meta: debugMeta || null, stage: "rangeText", after: input.value });
+      scheduleRevertProbe("rangeText");
+      return formatted;
+    }
+
+    input.value = formatted;
+    emitChanges();
+    clampDebug("clamp-write-after", { meta: debugMeta || null, stage: "direct", after: input.value });
+    scheduleRevertProbe("direct");
+    return formatted;
+  }
+
+  function formatSizeForToast(value, unit = getSizeUnit()) {
+    if (!Number.isFinite(value) || value <= 0) return "0";
+    if (unit === "USD" || unit === "USDC") {
+      return Number(value).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    return parseFloat(Number(value).toFixed(6)).toString();
   }
 
   // ── Input clamping ──────────────────────────────────────────────────────────
@@ -1021,8 +1352,10 @@
 
   function clampInputIfNeeded(input) {
     if (!balanceVerified) return;
+    if (!validatorDataLoaded) return;
     if (isClampingInProgress) return;
-    if (!isSizeInput(input)) return; // only clamp the size input
+    input = resolveLiveSizeInput(input);
+    if (!input) return; // only clamp the active/live size input
 
     const v = parseNumber(input.value);
     if (v <= 0) return;
@@ -1036,28 +1369,39 @@
 
     const symbol = getCurrentSymbol();
     const currentPairNotional = (symbol && ACCOUNT.notionalByPair[symbol]) || 0;
-    const hlLev = getHLLeverage();
-
-    const maxNotionalPerPair = MAX_SINGLE();
-    const maxNotionalTotal = MAX_TOTAL();
+    const maxNotionalPerPair = effectiveMaxSingleUsd();
+    const maxNotionalTotal = effectiveMaxTotalUsd();
 
     const leftSingle = maxNotionalPerPair - currentPairNotional;
     const leftTotal = maxNotionalTotal - ACCOUNT.openTotalUsed;
-    const maxAllowedNotional = Math.max(Math.min(leftSingle, leftTotal), 0);
+    const minLeft = Math.min(leftSingle, leftTotal);
+    const maxAllowedNotional = Math.max(minLeft, 0);
+
+    let constraint;
+    if (leftSingle <= leftTotal) {
+      constraint = 'per-pair';
+    } else {
+      constraint = 'portfolio';
+    }
 
     // Add a 1 cent tolerance to prevent infinite loops from rounding precision
     if (notional > maxAllowedNotional + 0.01 && notional > 0) {
-      const constraint = leftSingle <= leftTotal ? 'per-pair' : 'portfolio';
+      forceBlockTrade("input-over-limit");
 
       if (maxAllowedNotional < VANTA_MIN_POSITION_USD) {
-        isClampingInProgress = true;
-        setInputValue(input, 0);
-        isClampingInProgress = false;
         console.log(
-          `[Hyperscaled] Order rejected — clamped notional ${fmt(maxAllowedNotional)} ` +
-          `below $${VANTA_MIN_POSITION_USD} minimum (${constraint} limit, HL ${hlLev}x)`
+          `[Hyperscaled] Order rejected — blocked over-limit notional ${fmt(maxAllowedNotional)} ` +
+          `below $${VANTA_MIN_POSITION_USD} minimum (${constraint} limit)`
         );
-        showClampToast(notional, 0, hlLev, constraint);
+        showClampToast({
+          requestedNotional: notional,
+          allowedNotional: 0,
+          constraint,
+          requestedSize: v,
+          clampedSize: 0,
+          sizeUnit: getSizeUnit(),
+          blocked: true,
+        });
         return;
       }
 
@@ -1065,19 +1409,36 @@
       const ratio = maxAllowedNotional / notional;
       const clampedInput = v * ratio;
 
-      isClampingInProgress = true;
-      setInputValue(input, clampedInput);
-      isClampingInProgress = false;
       console.log(
-        `[Hyperscaled] Clamped: requested ${fmt(notional)} → allowed ${fmt(maxAllowedNotional)} ` +
-        `(${constraint} limit). HL leverage: ${hlLev}x`
+        `[Hyperscaled] Order blocked: requested ${fmt(notional)} > allowed ${fmt(maxAllowedNotional)} ` +
+        `(${constraint} limit)`
       );
-      showClampToast(notional, maxAllowedNotional, hlLev, constraint);
+      showClampToast({
+        requestedNotional: notional,
+        allowedNotional: maxAllowedNotional,
+        constraint,
+        requestedSize: v,
+        clampedSize: clampedInput,
+        sizeUnit: getSizeUnit(),
+        blocked: true,
+      });
+      return;
     }
+
+    releaseForcedTradeBlock();
+    checkAndBlockButtons();
   }
 
   let lastToastTime = 0;
-  function showClampToast(requested, allowed, leverage, constraint) {
+  function showClampToast(details) {
+    const requested = Number(details?.requestedNotional) || 0;
+    const allowed = Number(details?.allowedNotional) || 0;
+    const constraint = details?.constraint || "portfolio";
+    const requestedSize = Number(details?.requestedSize) || 0;
+    const clampedSize = Number(details?.clampedSize) || 0;
+    const sizeUnit = details?.sizeUnit || getSizeUnit();
+    const isBlockedOnly = details?.blocked === true;
+
     const now = Date.now();
     if (now - lastToastTime < 3000) return; // Prevent spam
     lastToastTime = now;
@@ -1093,14 +1454,26 @@
     const toast = document.createElement("div");
     toast.className = allowed === 0 ? "hf-toast hf-toast--warning" : "hf-toast hf-toast--alert";
     
-    let messageHtml = "Order exceeds your <b>" + constraint + " margin limit</b> (with " + leverage + "x leverage).";
-    let titleHtml = "Hyperscaled: Reduced to " + fmt(allowed);
+    let messageHtml = "Order exceeds your <b>" + constraint + " position size limit</b>.";
+    let titleHtml = "Hyperscaled: Size clamped to " + formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit;
     let iconHtml = "⚠️";
-    
+
     if (allowed === 0) {
        titleHtml = "Hyperscaled: Order Prevented";
-       messageHtml = "Available margin cannot support the minimum order size (with " + leverage + "x leverage).";
+       messageHtml = "Available capacity is below the minimum order size.";
        iconHtml = "⛔";
+    } else if (isBlockedOnly) {
+       titleHtml = "Hyperscaled: Order Blocked";
+       messageHtml = "Reduce size to " + formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + " or less to place this order.";
+       iconHtml = "⛔";
+    } else if (constraint === 'per-pair') {
+       messageHtml = "Single-asset limit is <b>" + fmt(effectiveMaxSingleUsd()) + "</b>. Size " +
+         formatSizeForToast(requestedSize, sizeUnit) + " " + sizeUnit + " should be reduced to " +
+         formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + ".";
+    } else {
+       messageHtml = "Portfolio capacity allows <b>" + fmt(allowed) + "</b>. Size " +
+         formatSizeForToast(requestedSize, sizeUnit) + " " + sizeUnit + " should be reduced to " +
+         formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + ".";
     }
 
     toast.innerHTML = 
@@ -1131,6 +1504,7 @@
   // loaded when user first typed, or React re-rendered the value).
   function checkAndClampOrderValue() {
     if (!balanceVerified) return;
+    if (!validatorDataLoaded) return;
     if (isClampingInProgress) return;
 
     const orderValue = readOrderValueFromDOM();
@@ -1138,21 +1512,21 @@
 
     const symbol = getCurrentSymbol();
     const currentPairNotional = (symbol && ACCOUNT.notionalByPair[symbol]) || 0;
-    const hlLev = getHLLeverage();
-    
-    const maxNotionalPerPair = MAX_SINGLE();
-    const maxNotionalTotal = MAX_TOTAL();
+    const maxNotionalPerPair = effectiveMaxSingleUsd();
+    const maxNotionalTotal = effectiveMaxTotalUsd();
 
     const leftSingle = maxNotionalPerPair - currentPairNotional;
     const leftTotal = maxNotionalTotal - ACCOUNT.openTotalUsed;
     const maxAllowed = Math.max(Math.min(leftSingle, leftTotal), 0);
 
     // Add a 1 cent tolerance to prevent infinite loops from rounding precision
-    if (orderValue <= maxAllowed + 0.01) return;
+    if (orderValue <= maxAllowed + 0.01) {
+      releaseForcedTradeBlock();
+      checkAndBlockButtons();
+      return;
+    }
 
-    const sizeContainer = document.querySelector('[data-testid="sz-input"]');
-    if (!sizeContainer) return;
-    const input = sizeContainer.querySelector('input');
+    const input = resolveLiveSizeInput(lastEditedInput);
     if (!input) return;
 
     const v = parseNumber(input.value);
@@ -1162,16 +1536,27 @@
     let clampedInput = v * ratio;
     if (maxAllowed < VANTA_MIN_POSITION_USD) clampedInput = 0;
 
-    isClampingInProgress = true;
-    setInputValue(input, clampedInput);
-    isClampingInProgress = false;
+    forceBlockTrade("order-value-over-limit");
 
-    const constraint = leftSingle <= leftTotal ? 'per-pair' : 'portfolio';
+    let constraint;
+    if (leftSingle <= leftTotal) {
+      constraint = 'per-pair';
+    } else {
+      constraint = 'portfolio';
+    }
     console.log(
       `[Hyperscaled] Order Value backstop: ${fmt(orderValue)} → ${fmt(maxAllowed)} ` +
-      `(${constraint}). HL leverage: ${hlLev}x`
+      `(${constraint})`
     );
-    showClampToast(orderValue, maxAllowed < VANTA_MIN_POSITION_USD ? 0 : maxAllowed, hlLev, constraint);
+    showClampToast({
+      requestedNotional: orderValue,
+      allowedNotional: maxAllowed < VANTA_MIN_POSITION_USD ? 0 : maxAllowed,
+      constraint,
+      requestedSize: v,
+      clampedSize: clampedInput,
+      sizeUnit: getSizeUnit(),
+      blocked: true,
+    });
   }
 
   // ── Submit button blocking ──────────────────────────────────────────────────
@@ -1189,6 +1574,7 @@
   let isEnforcingBlock = false;
   let tradeGuardsInstalled = false;
   let tradeGuardAbort = null;
+  let forcedTradeBlock = false;
 
   function normalizeTradeText(text) {
     return (text || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1398,6 +1784,19 @@
     queueTradeBlockEnforce();
   }
 
+  function forceBlockTrade(reason = "limit") {
+    forcedTradeBlock = true;
+    shouldBlockTrade = true;
+    enforceTradeBlock();
+    startTradeBlockObserver();
+    installTradeGuards();
+    clampDebug("trade-block-forced", { reason });
+  }
+
+  function releaseForcedTradeBlock() {
+    forcedTradeBlock = false;
+  }
+
   function installTradeGuards() {
     if (tradeGuardsInstalled) return;
     tradeGuardsInstalled = true;
@@ -1433,14 +1832,15 @@
     // Blocking works even if API limits aren't loaded yet (uses balance-based fallbacks)
     // But we need balance to be verified first
     if (!balanceVerified) return;
+    if (!validatorDataLoaded) return;
 
     const hlLev = getHLLeverage();
     const pending = getPendingNotional();
     const symbol = getCurrentSymbol();
     const currentPairNotional = (symbol && ACCOUNT.notionalByPair[symbol]) || 0;
 
-    const maxNotionalPerPair = MAX_SINGLE();
-    const maxNotionalTotal = MAX_TOTAL();
+    const maxNotionalPerPair = effectiveMaxSingleUsd();
+    const maxNotionalTotal = effectiveMaxTotalUsd();
 
     const leftSingle = maxNotionalPerPair - currentPairNotional;
     const leftTotal = maxNotionalTotal - ACCOUNT.openTotalUsed;
@@ -1448,8 +1848,13 @@
     const alreadyAtLimit = leftSingle <= 0 || leftTotal <= 0;
     const overSingle = pending > 0 && pending >= leftSingle;
     const overTotal = pending > 0 && pending >= leftTotal;
+    const orderValue = readOrderValueFromDOM();
+    const maxAllowedFromCurrent = Math.max(Math.min(leftSingle, leftTotal), 0);
+    const overByOrderValue = orderValue > maxAllowedFromCurrent + 0.01;
 
-    shouldBlockTrade = alreadyAtLimit || overSingle || overTotal;
+    // forcedTradeBlock is set by explicit over-limit checks and protects against
+    // cases where pending sources briefly lag HL's latest render.
+    shouldBlockTrade = forcedTradeBlock || alreadyAtLimit || overSingle || overTotal || overByOrderValue;
     enforceTradeBlock();
     startTradeBlockObserver();
     installTradeGuards();
@@ -1467,6 +1872,7 @@
 
   // ── Binding to ALL inputs (no type selector) ────────────────────────────────
   const bound = new WeakSet();
+  let clampDebounceTimer = null;
 
   function bindInputsOnce() {
     const inputs = [...document.querySelectorAll("input")].filter(
@@ -1481,10 +1887,18 @@
       const opts = { capture: true, passive: true };
 
       input.addEventListener("focus", () => { lastEditedInput = input; scheduleUpdate(); }, opts);
-      input.addEventListener("input", () => { lastEditedInput = input; clampInputIfNeeded(input); scheduleUpdate(); }, opts);
+      input.addEventListener("input", () => {
+        lastEditedInput = input;
+        releaseForcedTradeBlock();
+        scheduleUpdate();
+        // Debounce clamp so it fires once after the user pauses, not on every keystroke
+        clearTimeout(clampDebounceTimer);
+        clampDebounceTimer = setTimeout(() => clampInputIfNeeded(input), 400);
+      }, opts);
       input.addEventListener("keydown", () => { lastEditedInput = input; scheduleUpdate(); }, opts);
       input.addEventListener("keyup", () => { lastEditedInput = input; scheduleUpdate(); }, opts);
       input.addEventListener("change", () => { lastEditedInput = input; clampInputIfNeeded(input); scheduleUpdate(); }, opts);
+      input.addEventListener("blur", () => { clearTimeout(clampDebounceTimer); clampInputIfNeeded(input); }, opts);
     }
   }
 

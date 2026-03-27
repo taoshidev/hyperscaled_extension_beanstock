@@ -597,7 +597,8 @@ button.hf-trade-blocked:disabled {
 }
 
 /* ── Order Clamped Toast ────────────────────────────────────────────────── */
-.hf-toast-container {
+/* #hf-toast-container: high specificity vs HL rules; `background` shorthand clears host images */
+#hf-toast-container.hf-toast-container {
   display: flex !important;
   position: fixed !important;
   top: 54px !important;
@@ -606,19 +607,29 @@ button.hf-trade-blocked:disabled {
   flex-direction: column !important;
   gap: 12px !important;
   pointer-events: none !important;
+  opacity: 1 !important;
+  --hf-toast-surface: #141416;
+  --hf-toast-text: #fafafa;
 }
 
-.hf-toast {
+#hf-toast-container .hf-toast {
   display: flex !important;
   align-items: flex-start !important;
   gap: 12px !important;
-  background: var(--bg, #18181b) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  isolation: isolate !important;
+  mix-blend-mode: normal !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #141416 none !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
   border-radius: 16px !important;
   padding: 16px !important;
-  box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 60px rgba(0, 198, 167, 0.06) !important;
-  color: var(--text-primary, #ffffff) !important;
-  font-family: var(--font-ui, system-ui, sans-serif) !important;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.35) inset,
+    0 24px 48px rgba(0, 0, 0, 0.65),
+    0 0 60px rgba(0, 198, 167, 0.06) !important;
+  color: #fafafa !important;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
   line-height: 1.5 !important;
   opacity: 0 !important;
   transform: translateY(-10px) !important;
@@ -630,24 +641,17 @@ button.hf-trade-blocked:disabled {
   overflow: hidden !important;
 }
 
-.hf-toast.hf-toast-show {
+#hf-toast-container .hf-toast.hf-toast-show {
   opacity: 1 !important;
   transform: translateY(0) !important;
 }
 
-.hf-toast::before {
-  content: '' !important;
-  position: absolute !important;
-  top: -150px !important;
-  right: -150px !important;
-  width: 300px !important;
-  height: 300px !important;
-  background: radial-gradient(circle, rgba(0, 198, 167, 0.07) 0%, transparent 55%) !important;
-  pointer-events: none !important;
-  z-index: 0 !important;
+#hf-toast-container .hf-toast::before {
+  display: none !important;
+  content: none !important;
 }
 
-.hf-toast-icon {
+#hf-toast-container .hf-toast-icon {
   font-size: 20px !important;
   flex-shrink: 0 !important;
   z-index: 1 !important;
@@ -655,7 +659,7 @@ button.hf-trade-blocked:disabled {
   padding-top: 2px !important;
 }
 
-.hf-toast-content {
+#hf-toast-container .hf-toast-content {
   display: flex !important;
   flex-direction: column !important;
   gap: 6px !important;
@@ -663,53 +667,75 @@ button.hf-trade-blocked:disabled {
   flex: 1 !important;
 }
 
-.hf-toast-title {
+#hf-toast-container .hf-toast-title {
   font-weight: 700 !important;
   font-size: 14px !important;
-  color: rgba(255, 255, 255, 0.9) !important;
+  color: #f4f4f5 !important;
   letter-spacing: -0.2px !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85) !important;
 }
 
-.hf-toast-msg {
-  color: rgba(255,255,255,0.7) !important;
+#hf-toast-container .hf-toast-msg {
+  color: rgba(255, 255, 255, 0.82) !important;
   font-size: 12px !important;
   line-height: 1.6 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75) !important;
 }
 
-.hf-toast-msg b {
+#hf-toast-container .hf-toast-msg b {
   color: #ffffff !important;
   font-weight: 600 !important;
 }
 
-/* Toast Variants */
-.hf-toast--info {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+/* Variants — same opaque shell for alert (reduced to) / warning (blocked) / info */
+#hf-toast-container .hf-toast--info {
+  background: #141416 none !important;
+  border: 1px solid rgba(0, 198, 167, 0.35) !important;
+  border-left: 3px solid #00c6a7 !important;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.35) inset,
+    0 24px 48px rgba(0, 0, 0, 0.65),
+    0 0 40px rgba(0, 198, 167, 0.10) !important;
 }
-.hf-toast--info .hf-toast-title {
-  color: #00c6a7 !important;
-}
-
-.hf-toast--alert {
-  background: rgba(255, 185, 0, 0.08) !important;
-  border-color: rgba(255, 185, 0, 0.25) !important;
-  box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 60px rgba(255, 185, 0, 0.06) !important;
-}
-.hf-toast--alert::before {
-  background: radial-gradient(circle, rgba(255, 185, 0, 0.07) 0%, transparent 55%) !important;
-}
-.hf-toast--alert .hf-toast-title {
-  color: #ffb900 !important;
+#hf-toast-container .hf-toast--info .hf-toast-title {
+  color: #5eead4 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9) !important;
 }
 
-.hf-toast--warning {
-  background: rgba(239, 68, 68, 0.08) !important;
-  border-color: rgba(239, 68, 68, 0.25) !important;
-  box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 60px rgba(239, 68, 68, 0.06) !important;
+#hf-toast-container .hf-toast--alert {
+  background: #1a1712 none !important;
+  border: 1px solid rgba(255, 185, 0, 0.55) !important;
+  border-left: 3px solid #ffb900 !important;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.4) inset,
+    0 24px 48px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 185, 0, 0.18) inset,
+    0 0 56px rgba(255, 185, 0, 0.16) !important;
 }
-.hf-toast--warning::before {
-  background: radial-gradient(circle, rgba(239, 68, 68, 0.07) 0%, transparent 55%) !important;
+#hf-toast-container .hf-toast--alert .hf-toast-title {
+  color: #fcd34d !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9) !important;
 }
-.hf-toast--warning .hf-toast-title {
-  color: rgb(239, 68, 68) !important;
+#hf-toast-container .hf-toast--alert .hf-toast-msg {
+  color: rgba(255, 255, 255, 0.94) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85) !important;
+}
+
+#hf-toast-container .hf-toast--warning {
+  background: #120f0f none !important;
+  border: 1px solid rgba(239, 68, 68, 0.55) !important;
+  border-left: 3px solid #f87171 !important;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.4) inset,
+    0 24px 48px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(239, 68, 68, 0.2) inset,
+    0 0 56px rgba(239, 68, 68, 0.18) !important;
+}
+#hf-toast-container .hf-toast--warning .hf-toast-title {
+  color: #fecaca !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92) !important;
+}
+#hf-toast-container .hf-toast--warning .hf-toast-msg {
+  color: rgba(255, 255, 255, 0.94) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85) !important;
 }

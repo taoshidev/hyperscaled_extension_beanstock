@@ -787,3 +787,40 @@ A full settings view with wallet configuration, push notification toggles, and a
 - Toggle state is controlled via `data-state` attribute. CSS reads it; JS writes it.
 - The last toggle row uses `settings-toggle-row--last` to remove its bottom border.
 - The "Disconnect Wallet" button uses the ghost button pattern — no destructive red styling (confirmation is JS's responsibility).
+
+---
+
+## Hyperliquid clamp toast (content script)
+
+Toast anchored top-right on the Hyperliquid site when the extension clamps order size or blocks an order below the exchange minimum. Rendered by `showClampToast()` in `content.js` into `#hf-toast-container`.
+
+### HTML structure (JS-generated)
+
+```html
+<div id="hf-toast-container" class="hf-toast-container">
+  <div class="hf-toast hf-toast--warning hf-toast-show">
+    <div class="hf-toast-icon">…</div>
+    <div class="hf-toast-content">
+      <div class="hf-toast-title">Hyperscaled: Order Prevented</div>
+      <div class="hf-toast-msg">Available margin cannot support the minimum order size (with 1x leverage).</div>
+    </div>
+  </div>
+</div>
+```
+
+### Variants
+
+| Class | When |
+|-------|------|
+| `hf-toast--warning` | Clamped to zero — cannot meet minimum notional (`allowed === 0`). |
+| `hf-toast--alert` | Reduced to a positive allowed size. |
+| `hf-toast--info` | Registration / payment prompts. |
+
+### Tokens used
+
+See **Hyperliquid page toasts** in `design-rules.md` — all variants (`--alert` / `--warning` / `--info`) use the same fully opaque treatment; CSS is scoped under `#hf-toast-container` with `background: #hex none` so HL cannot layer translucent backgrounds on “Reduced to …” alerts.
+
+### Rules
+
+- Throttle repeated toasts (3s) in JS to avoid spam.
+- Icon column is emoji today; copy may use `<b>` inside `.hf-toast-msg` for limits.
