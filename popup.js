@@ -66,6 +66,7 @@ async function refreshValidatorData() {
 
         if (result.status && result.status !== 'success') {
             console.warn('[Hyperscaled Popup] Validator returned non-success status:', result.status);
+            hideDashboard();
             return;
         }
 
@@ -189,9 +190,12 @@ async function refreshValidatorData() {
         // Positions
         renderPositions(openPositions, accountSize);
 
+        // Data loaded successfully — show the dashboard
+        showDashboard();
+
     } catch (e) {
         console.error('[Hyperscaled Popup] Validator data fetch failed:', e.message, e);
-        setPlaceholders();
+        hideDashboard();
     }
 }
 
@@ -407,6 +411,44 @@ async function saveAddress(address) {
     });
 }
 
+function showDashboard() {
+    const el = document.getElementById('dashboardContent');
+    if (el) el.style.display = '';
+}
+
+function hideDashboard() {
+    const el = document.getElementById('dashboardContent');
+    if (el) el.style.display = 'none';
+    setPlaceholders();
+}
+
+function disconnectWallet() {
+    chrome.storage.local.remove(['hlAddress', 'lastEventTimestampMs', 'recentEvents']);
+    storedAddress = null;
+    traderLimits = null;
+    if (refreshIntervalId) {
+        clearInterval(refreshIntervalId);
+        refreshIntervalId = null;
+    }
+    hideDashboard();
+    // Clear address input and reset to welcome screen
+    const addressInput = document.getElementById('walletAddress');
+    if (addressInput) addressInput.value = '';
+    const walletStatus = document.getElementById('walletStatus');
+    if (walletStatus) { walletStatus.textContent = ''; walletStatus.className = 'wallet-status'; }
+    // Hide disconnect button (back to welcome mode)
+    const disconnectBtn = document.getElementById('walletDisconnect');
+    if (disconnectBtn) disconnectBtn.style.display = 'none';
+    // Hide collapsed wallet, show wallet config
+    showWalletExpanded();
+    // Hide settings screen if open
+    const settingsScreen = document.getElementById('settingsScreen');
+    if (settingsScreen) settingsScreen.style.display = 'none';
+    // Reset balance header
+    const hlBalanceHeader = document.getElementById('hlBalanceHeader');
+    if (hlBalanceHeader) hlBalanceHeader.textContent = '$0.00';
+}
+
 function updateData() {
     refreshBalance();
     refreshValidatorData();
@@ -433,8 +475,11 @@ function showWalletExpanded() {
     const collapsed = document.getElementById('walletCollapsed');
     const config = document.getElementById('walletConfig');
     const addressInput = document.getElementById('walletAddress');
+    const disconnectBtn = document.getElementById('walletDisconnect');
     if (collapsed) collapsed.style.display = 'none';
     if (config) config.style.display = '';
+    // Show disconnect button only when editing an existing address
+    if (disconnectBtn) disconnectBtn.style.display = storedAddress ? '' : 'none';
     if (addressInput) { addressInput.focus(); addressInput.select(); }
 }
 
@@ -630,6 +675,16 @@ document.addEventListener('DOMContentLoaded', async function() {
             refreshValidatorData();
             refreshTraderLimits();
         });
+    }
+
+    // ── Disconnect wallet ──────────────────────────────────
+    const walletDisconnectBtn = document.getElementById('walletDisconnect');
+    if (walletDisconnectBtn) {
+        walletDisconnectBtn.addEventListener('click', disconnectWallet);
+    }
+    const settingsDisconnectBtn = document.getElementById('settingsDisconnect');
+    if (settingsDisconnectBtn) {
+        settingsDisconnectBtn.addEventListener('click', disconnectWallet);
     }
 
     const testRegBtn = document.getElementById('testRegFlowBtn');

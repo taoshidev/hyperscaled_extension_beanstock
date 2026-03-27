@@ -37,6 +37,7 @@
                 </div>
                 <input type="text" id="walletAddress" placeholder="0x..." class="wallet-input wallet-input--full" spellcheck="false" />
                 <button id="walletSave" class="wallet-save-btn wallet-save-btn--full">Check</button>
+                <button id="walletDisconnect" class="wallet-disconnect-link" style="display: none;">Disconnect Wallet</button>
                 <div class="not-registered-signup">
                     <span class="not-registered-signup-text">Not registered yet?</span>
                     <a href="https://hyperscaled.trade" target="_blank" class="not-registered-signup-link">Sign up at hyperscaled.trade →</a>
@@ -80,6 +81,9 @@
             </div>
             <div class="pending-footer-note">You'll receive an email confirmation once registration is complete.</div>
         </div>
+
+        <!-- Dashboard Content (shown only when valid data is available) -->
+        <div id="dashboardContent" style="display: none;">
 
         <!-- Section 1: Account Balances (2-column grid) -->
         <div class="balance-grid">
@@ -187,6 +191,8 @@
                 </div>
             </a>
         </div>
+
+        </div><!-- /dashboardContent -->
 
         <!-- ── Screen: Positions (full list) ────────────── -->
         <div id="positionsScreen" class="screen-positions" style="display: none;">
