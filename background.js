@@ -186,6 +186,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'hlPaymentWalletDetected') {
+    (async () => {
+      try {
+        const stored = await chrome.storage.local.get(['hlPaymentSourceTabId']);
+        const sourceTabId = stored.hlPaymentSourceTabId;
+        if (sourceTabId) {
+          await chrome.tabs.sendMessage(sourceTabId, {
+            action: 'hlPaymentUpdate',
+            status: 'wallet_detected',
+            data: {
+              senderAddress: request.senderAddress || null,
+            },
+          });
+        }
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error('[Hyperscaled BG] hlPaymentWalletDetected relay error:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (request.action === 'hlPaymentSent') {
     (async () => {
       try {

@@ -1611,6 +1611,18 @@
       if (sendBtn) {
         clearInterval(registrationInterval);
         sessionStorage.removeItem("hf_pending_registration");
+
+        // Report connected wallet to website BEFORE filling the form
+        // so verification polling uses the actual paying address
+        getUserAddress().then((addr) => {
+          if (addr) {
+            chrome.runtime.sendMessage({
+              action: "hlPaymentWalletDetected",
+              senderAddress: addr,
+            });
+          }
+        }).catch(() => {});
+
         sendBtn.click();
         setTimeout(() => fillSendModal(destination, amount), 500);
       }
