@@ -692,6 +692,29 @@ document.addEventListener('DOMContentLoaded', async function() {
         settingsDisconnectBtn.addEventListener('click', disconnectWallet);
     }
 
+    // ── Settings: HL address save ───────────────────────────
+    const settingsHlSaveBtn = document.getElementById('settingsHlSave');
+    const settingsHlInput = document.getElementById('settingsHlAddress');
+    if (settingsHlInput && storedAddress) settingsHlInput.value = storedAddress;
+    if (settingsHlSaveBtn) {
+        settingsHlSaveBtn.addEventListener('click', async () => {
+            const val = (settingsHlInput?.value || '').trim();
+            if (!/^0x[a-fA-F0-9]{40}$/.test(val)) {
+                settingsHlSaveBtn.textContent = 'Invalid';
+                setTimeout(() => { settingsHlSaveBtn.textContent = 'Save'; }, 1500);
+                return;
+            }
+            await saveAddress(val);
+            storedAddress = val;
+            showWalletCollapsed(val);
+            refreshBalance();
+            refreshValidatorData();
+            refreshTraderLimits();
+            settingsHlSaveBtn.textContent = 'Saved';
+            setTimeout(() => { settingsHlSaveBtn.textContent = 'Save'; }, 1500);
+        });
+    }
+
     const testRegBtn = document.getElementById('testRegFlowBtn');
     if (testRegBtn) {
         testRegBtn.addEventListener('click', async () => {

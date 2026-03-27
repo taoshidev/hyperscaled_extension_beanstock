@@ -39,6 +39,8 @@
     maxPositionPerPair: 0,
     maxPortfolio: 0,
     notionalByPair: {},
+    inChallenge: false,
+    isRegistered: false,
   };
 
   let midPrices = {}; // { BTC: 87000, ETH: 3400, ... }
@@ -177,7 +179,7 @@
         <span class="hf-brand"><img src="${chrome.runtime.getURL('images/hyperscaled-logo.svg')}" alt="Hyperscaled" class="hf-brand-logo"></span>
 
         <!-- 2. Status badge -->
-        <span class="hf-status-badge">● In Challenge</span>
+        ${ACCOUNT.isRegistered ? `<span class="hf-status-badge">● ${ACCOUNT.inChallenge ? 'In Challenge' : 'Funded'}</span>` : ''}
 
         <!-- 3. Divider -->
         <span class="hf-divider"></span>
@@ -491,28 +493,28 @@
   }
 
   async function getUserAddress() {
-    // Always try to read from the page first
-    const detected = detectAddressFromPage();
-    if (detected) {
-      // Sync detected address back to storage so popup/background use the same one
-      chrome.storage.local.get(["hlAddress"], (result) => {
-        if (result.hlAddress !== detected) {
-          console.log("[Hyperscaled] Syncing detected address to storage:", detected);
-          chrome.storage.local.set({ hlAddress: detected });
-        }
-      });
-      return detected;
-    }
-    // Fall back to manually entered address from popup
+    // Prefer the address set in the popup/storage — it's the authoritative source
     return new Promise((resolve) => {
       chrome.storage.local.get(["hlAddress"], (result) => {
-        resolve(result.hlAddress || null);
+        if (result.hlAddress) {
+          resolve(result.hlAddress);
+          return;
+        }
+        // Only fall back to page detection when no address is stored yet
+        const detected = detectAddressFromPage();
+        if (detected) {
+          console.log("[Hyperscaled] Auto-detected address from page:", detected);
+          chrome.storage.local.set({ hlAddress: detected });
+          resolve(detected);
+        } else {
+          resolve(null);
+        }
       });
     });
   }
 
-  async function fetchTraderLimits() {
-    const address = await getUserAddress();
+  async function fetchTraderLimits(overrideAddress = null) {
+    const address = overrideAddress || await getUserAddress();
     if (!address) return;
 
     try {
@@ -595,8 +597,8 @@
     }
   }
 
-  async function fetchValidatorData() {
-    const address = await getUserAddress();
+  async function fetchValidatorData(overrideAddress = null) {
+    const address = overrideAddress || await getUserAddress();
     if (!address) return;
 
     try {
@@ -655,6 +657,12 @@
         }
       }
       ACCOUNT.notionalByPair = notionalByPair;
+
+      ACCOUNT.isRegistered = true;
+
+      // Challenge status from API
+      const cp = result.challenge_period || {};
+      ACCOUNT.inChallenge = !!cp.bucket && cp.bucket.includes('CHALLENGE');
 
       // Challenge & drawdown from API (new response shape)
       const dd = result.drawdown || {};
@@ -716,8 +724,8 @@
     updateBanner(getPendingNotional());
   }
 
-  async function checkBalance() {
-    const address = await getUserAddress();
+  async function checkBalance(overrideAddress = null) {
+    const address = overrideAddress || await getUserAddress();
     console.log("[Hyperscaled] checkBalance address:", address);
     if (!address) {
       console.warn("[Hyperscaled] No address found");
@@ -793,9 +801,31 @@
 
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === "local" && changes.hlAddress) {
-      checkBalance();
-      fetchValidatorData();
-      fetchTraderLimits();
+      const newAddress = changes.hlAddress.newValue;
+      if (!newAddress) return;
+
+      // Immediately clear stale account data so the banner doesn't show
+      // the old wallet's numbers while the new fetch is in flight.
+      ACCOUNT.hlBalance = 0;
+      ACCOUNT.fundedSize = 0;
+      ACCOUNT.challengeCurrent = 0;
+      ACCOUNT.drawdownCurrent = 0;
+      ACCOUNT.daily_loss_pct = 0;
+      ACCOUNT.eod_trailing_loss_pct = 0;
+      ACCOUNT.intraday_usage_pct = 0;
+      ACCOUNT.eod_usage_pct = 0;
+      ACCOUNT.openSingleUsed = 0;
+      ACCOUNT.openTotalUsed = 0;
+      ACCOUNT.notionalByPair = {};
+      ACCOUNT.inChallenge = false;
+      ACCOUNT.isRegistered = false;
+      validatorDataLoaded = false;
+      updateBannerFromValidator();
+
+      // Pass the new address directly — no redundant storage re-read.
+      checkBalance(newAddress);
+      fetchValidatorData(newAddress);
+      fetchTraderLimits(newAddress);
       fetchMidPrices();
     }
   });
