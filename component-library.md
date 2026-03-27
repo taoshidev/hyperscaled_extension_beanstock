@@ -824,3 +824,32 @@ See **Hyperliquid page toasts** in `design-rules.md` — all variants (`--alert`
 
 - Throttle repeated toasts (3s) in JS to avoid spam.
 - Icon column is emoji today; copy may use `<b>` inside `.hf-toast-msg` for limits.
+
+---
+
+## Hyperliquid injected banner blocked-state styling (content script)
+
+When `shouldBlockTrade` is true, JS applies `hf-blocked` to `#hf-banner`. This class indicates order-capacity blocking, but the banner remains visually neutral (no red danger wash).
+
+### HTML structure (stateful class)
+
+```html
+<div id="hf-banner" class="hf-blocked">
+  <div class="hf-bar">...</div>
+</div>
+```
+
+### Tokens used
+
+| Element | Property | Token / Value |
+|---------|----------|---------------|
+| `.hf-bar` | Bottom border | `--border-card` |
+| `.hf-disabled-msg` | Text color | `--text-subtle` |
+| `.hf-icon-disabled` | Icon color | `--text-subtle` |
+| `.hf-sub-strip` | Surface / border | `rgba(255,255,255,0.03)` / `--border-card` |
+| `.hf-sub-strip-btn` | Border / text / hover | `--border-card` / `--text-subtle` / `rgba(255,255,255,0.06)` |
+
+### Rules
+
+- `hf-blocked` is a behavior/state flag; do not treat it as a drawdown-breach color state.
+- Reserve red styling for directional loss and true danger semantics (PnL negative, breach values, warning toasts).

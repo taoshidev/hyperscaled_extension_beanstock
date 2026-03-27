@@ -73,8 +73,8 @@
   transition: border-color 0.15s ease !important;
 }
 
-#hf-banner.hf-disabled .hf-bar {
-  border-bottom-color: var(--danger-border) !important;
+#hf-banner.hf-blocked .hf-bar {
+  border-bottom-color: var(--border-card) !important;
 }
 
 #hf-banner.hf-warning .hf-bar {
@@ -488,18 +488,18 @@
   font-family: var(--font-ui) !important;
   font-size: 11px !important;
   font-weight: 700 !important;
-  color: var(--red) !important;
+  color: var(--text-subtle) !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
 }
 
-#hf-banner.hf-disabled .hf-disabled-msg {
+#hf-banner.hf-blocked .hf-disabled-msg {
   display: flex !important;
 }
 
 #hf-banner .hf-icon-disabled {
   flex-shrink: 0 !important;
-  color: var(--red) !important;
+  color: var(--text-subtle) !important;
 }
 
 /* ── Disabled sub-strip ─────────────────────────────────────────────────── */
@@ -508,11 +508,11 @@
   align-items: center !important;
   gap: var(--space-3) !important;
   padding: var(--space-2) var(--space-4) !important;
-  background: rgba(239,68,68,0.05) !important;
-  border-bottom: 1px solid var(--danger-border) !important;
+  background: rgba(255,255,255,0.03) !important;
+  border-bottom: 1px solid var(--border-card) !important;
 }
 
-#hf-banner.hf-disabled .hf-sub-strip {
+#hf-banner.hf-blocked .hf-sub-strip {
   display: flex !important;
 }
 
@@ -520,7 +520,7 @@
   font-family: var(--font-ui) !important;
   font-size: 11px !important;
   font-weight: 700 !important;
-  color: var(--red) !important;
+  color: var(--text-strong) !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
 }
@@ -541,12 +541,12 @@
   align-items: center !important;
   padding: var(--space-1) var(--space-3) !important;
   background: transparent !important;
-  border: 1px solid var(--danger-border) !important;
+  border: 1px solid var(--border-card) !important;
   border-radius: var(--radius-sm) !important;
   font-family: var(--font-ui) !important;
   font-size: 11px !important;
   font-weight: 500 !important;
-  color: var(--red) !important;
+  color: var(--text-subtle) !important;
   white-space: nowrap !important;
   cursor: pointer !important;
   flex-shrink: 0 !important;
@@ -555,8 +555,8 @@
 }
 
 #hf-banner .hf-sub-strip-btn:hover {
-  background: var(--danger-bg) !important;
-  border-color: rgba(239,68,68,0.45) !important;
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.14) !important;
 }
 
 #hf-banner .hf-sub-strip-via {

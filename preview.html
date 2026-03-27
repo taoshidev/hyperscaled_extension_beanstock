@@ -210,7 +210,7 @@ function setState(mode) {
     const ddStack = document.getElementById('hf-dd-stack');
     const disabledDiv = document.getElementById('hf-disabled-divider');
 
-    banner.classList.remove('hf-disabled', 'hf-warning');
+    banner.classList.remove('hf-blocked', 'hf-warning');
 
     switch (mode) {
         case 'normal':
@@ -260,19 +260,17 @@ function setState(mode) {
             break;
 
         case 'disabled':
-            banner.classList.add('hf-disabled');
+            banner.classList.add('hf-blocked');
             ddStack.innerHTML = `
               <div class="hf-dd-row">
                 <span class="hf-dd-label">DAILY</span>
-                <span class="hf-dd-value" id="hf-daily" style="color:var(--red) !important">5.12%</span>
+                <span class="hf-dd-value" id="hf-daily" style="color:var(--accent) !important">1.23%</span>
                 <span class="hf-dd-suffix">/ 5.00%</span>
-                <span class="hf-dd-warn" style="color:var(--red) !important">⚠</span>
               </div>
               <div class="hf-dd-row">
                 <span class="hf-dd-label">TRAILING</span>
-                <span class="hf-dd-value" id="hf-trailing" style="color:var(--red) !important">5.00%</span>
+                <span class="hf-dd-value" id="hf-trailing" style="color:var(--accent) !important">2.10%</span>
                 <span class="hf-dd-suffix">/ 5.00%</span>
-                <span class="hf-dd-warn" style="color:var(--red) !important">⚠</span>
               </div>`;
             targetFill.style.setProperty('width', '42%', 'important');
             targetFill.style.setProperty('background-color', 'var(--indigo)', 'important');

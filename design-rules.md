@@ -321,6 +321,21 @@ The injected banner's Daily/Trailing stat group is clickable and opens a dropdow
 
 ---
 
+## Injected Banner Blocked State
+
+When orders are blocked due to insufficient remaining capacity, the banner uses the `hf-blocked` class for behavior only (messaging + trade lock state), not a danger surface tint.
+
+| Element | Treatment |
+|---------|-----------|
+| `.hf-bar` bottom border | `--border-card` (neutral) |
+| Optional inline blocked text/icon | `--text-subtle` |
+| Optional sub-strip surface | `rgba(255,255,255,0.03)` + `1px solid --border-card` |
+| Optional sub-strip CTA | Neutral ghost treatment (`--border-card`, `--text-subtle`) |
+
+**Rule:** Capacity-blocked state should read as constrained, not breached. Reserve red danger surfaces for true loss/drawdown breach semantics only.
+
+---
+
 ## What This UI Should Never Have
 
 - Gradients used decoratively (the teal glow in `.container::before` is the only allowed ambient gradient)

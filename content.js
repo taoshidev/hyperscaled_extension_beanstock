@@ -736,9 +736,9 @@
   function applyBannerStateClasses(banner) {
     const dailyUsage = ACCOUNT.intraday_usage_pct || 0;
     const trailingUsage = ACCOUNT.eod_usage_pct || 0;
-    banner.classList.remove('hf-disabled', 'hf-warning');
+    banner.classList.remove('hf-blocked', 'hf-warning');
     if (shouldBlockTrade) {
-      banner.classList.add('hf-disabled');
+      banner.classList.add('hf-blocked');
     } else if (dailyUsage > 80 || trailingUsage > 80) {
       banner.classList.add('hf-warning');
     }
