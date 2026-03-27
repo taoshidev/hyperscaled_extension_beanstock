@@ -601,8 +601,8 @@ button.hf-trade-blocked:disabled {
 #hf-toast-container.hf-toast-container {
   display: flex !important;
   position: fixed !important;
-  top: 54px !important;
-  right: 24px !important;
+  top: 12px !important;
+  right: 16px !important;
   z-index: 9999999 !important;
   flex-direction: column !important;
   gap: 12px !important;
@@ -622,8 +622,8 @@ button.hf-trade-blocked:disabled {
   -webkit-backdrop-filter: none !important;
   background: #141416 none !important;
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 16px !important;
-  padding: 16px !important;
+  border-radius: 12px !important;
+  padding: 12px !important;
   box-shadow:
     0 4px 0 rgba(0, 0, 0, 0.35) inset,
     0 24px 48px rgba(0, 0, 0, 0.65),
@@ -635,7 +635,7 @@ button.hf-trade-blocked:disabled {
   transform: translateY(-10px) !important;
   transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
   pointer-events: auto !important;
-  width: 380px !important;
+  width: 320px !important;
   box-sizing: border-box !important;
   position: relative !important;
   overflow: hidden !important;
@@ -652,7 +652,7 @@ button.hf-trade-blocked:disabled {
 }
 
 #hf-toast-container .hf-toast-icon {
-  font-size: 20px !important;
+  font-size: 16px !important;
   flex-shrink: 0 !important;
   z-index: 1 !important;
   line-height: 1 !important;
@@ -669,7 +669,7 @@ button.hf-trade-blocked:disabled {
 
 #hf-toast-container .hf-toast-title {
   font-weight: 700 !important;
-  font-size: 14px !important;
+  font-size: 12px !important;
   color: #f4f4f5 !important;
   letter-spacing: -0.2px !important;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85) !important;
@@ -677,7 +677,7 @@ button.hf-trade-blocked:disabled {
 
 #hf-toast-container .hf-toast-msg {
   color: rgba(255, 255, 255, 0.82) !important;
-  font-size: 12px !important;
+  font-size: 11px !important;
   line-height: 1.6 !important;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75) !important;
 }

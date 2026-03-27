@@ -711,13 +711,38 @@ body {
     color: var(--text-strong);
 }
 
-.capacity-badge {
-    font-size: 10px;
+.capacity-row {
+    margin-bottom: var(--space-2);
+}
+
+.capacity-row:last-child {
+    margin-bottom: 0;
+}
+
+.capacity-row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.capacity-row-label {
+    font-size: 11px;
     font-family: var(--font-ui);
-    color: var(--text-ghost);
-    border: 1px solid var(--border-card);
-    border-radius: 4px;
-    padding: 2px 6px;
+    font-weight: 500;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.capacity-row-value {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.capacity-fill--pair {
+    background: var(--indigo);
 }
 
 .capacity-bar {

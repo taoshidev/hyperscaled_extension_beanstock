@@ -1399,7 +1399,7 @@
     checkAndBlockButtons();
   }
 
-  let lastToastTime = 0;
+  let activeClampToast = null;
   function showClampToast(details) {
     const requested = Number(details?.requestedNotional) || 0;
     const allowed = Number(details?.allowedNotional) || 0;
@@ -1409,30 +1409,17 @@
     const sizeUnit = details?.sizeUnit || getSizeUnit();
     const isBlockedOnly = details?.blocked === true;
 
-    const now = Date.now();
-    if (now - lastToastTime < 3000) return; // Prevent spam
-    lastToastTime = now;
-
-    let container = document.getElementById("hf-toast-container");
-    if (!container) {
-      container = document.createElement("div");
-      container.id = "hf-toast-container";
-      container.className = "hf-toast-container";
-      (document.body || document.documentElement).appendChild(container);
-    }
-
-    const toast = document.createElement("div");
-    toast.className = allowed === 0 ? "hf-toast hf-toast--warning" : "hf-toast hf-toast--alert";
-    
     let messageHtml = "Order exceeds your <b>" + constraint + " position size limit</b>.";
     let titleHtml = "Hyperscaled: Size clamped to " + formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit;
     let iconHtml = "⚠️";
+    let variantClass = "hf-toast hf-toast--alert";
 
     if (allowed === 0) {
        titleHtml = "Hyperscaled: Order Prevented";
        messageHtml =
          "No remaining capacity within your <b>" + constraint + "</b> position limit.";
        iconHtml = "⛔";
+       variantClass = "hf-toast hf-toast--warning";
     } else if (isBlockedOnly) {
        titleHtml = "Hyperscaled: Order Blocked";
        messageHtml = "Reduce size to " + formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + " or less to place this order.";
@@ -1447,27 +1434,48 @@
          formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + ".";
     }
 
-    toast.innerHTML = 
+    const innerHtml =
       '<div class="hf-toast-icon">' + iconHtml + '</div>' +
       '<div class="hf-toast-content">' +
         '<div class="hf-toast-title">' + titleHtml + '</div>' +
         '<div class="hf-toast-msg">' + messageHtml + '</div>' +
       '</div>';
 
+    // If toast already visible, just update its content — no destroy/recreate
+    if (activeClampToast && activeClampToast.parentNode) {
+      activeClampToast.className = variantClass + " hf-toast-show";
+      activeClampToast.innerHTML = innerHtml;
+      return;
+    }
+
+    let container = document.getElementById("hf-toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "hf-toast-container";
+      container.className = "hf-toast-container";
+      (document.body || document.documentElement).appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+    toast.className = variantClass;
+    toast.innerHTML = innerHtml;
+
     container.appendChild(toast);
+    activeClampToast = toast;
 
     // Trigger reflow for transition
     void toast.offsetWidth;
     toast.classList.add("hf-toast-show");
+  }
 
+  function dismissClampToast() {
+    if (!activeClampToast) return;
+    const toast = activeClampToast;
+    activeClampToast = null;
+    toast.classList.remove("hf-toast-show");
     setTimeout(() => {
-      toast.classList.remove("hf-toast-show");
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
-    }, 4500);
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
   }
 
   // Backstop: periodically check HL's Order Value and clamp if over limit.
@@ -1765,6 +1773,7 @@
 
   function releaseForcedTradeBlock() {
     forcedTradeBlock = false;
+    dismissClampToast();
   }
 
   function installTradeGuards() {

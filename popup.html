@@ -140,20 +140,36 @@
         <div class="capacity-block">
             <div class="capacity-header">
                 <span class="capacity-title">Trading Capacity</span>
-                <span class="capacity-badge"><span id="perPairMax">--</span> / <span id="capacityMax">--</span></span>
             </div>
-            <div class="capacity-bar">
-                <div class="capacity-fill capacity-fill--total" id="capacityFill" style="width: 0%;"></div>
+
+            <!-- Per-asset row -->
+            <div class="capacity-row">
+                <div class="capacity-row-header">
+                    <span class="capacity-row-label">Per Asset</span>
+                    <span class="capacity-row-value"><span id="perPairUsed">--</span> / <span id="perPairMax">--</span></span>
+                </div>
+                <div class="capacity-bar">
+                    <div class="capacity-fill capacity-fill--pair" id="perPairFill" style="width: 0%;"></div>
+                </div>
+                <div class="capacity-footer">
+                    <span class="capacity-used">Largest position</span>
+                    <span class="capacity-remaining"><span id="perPairRemaining">--</span> left</span>
+                </div>
             </div>
-            <div class="capacity-footer">
-                <span class="capacity-used"><span id="capacityUsed">--</span> used</span>
-                <span class="capacity-remaining"><span id="capacityRemaining">--</span> left</span>
-            </div>
-            <!-- Per-pair data retained for JS compatibility -->
-            <div style="display:none;">
-                <span id="perPairUsed">--</span>
-                <div id="perPairFill" style="width: 0%;"></div>
-                <span id="perPairRemaining">--</span>
+
+            <!-- Total portfolio row -->
+            <div class="capacity-row">
+                <div class="capacity-row-header">
+                    <span class="capacity-row-label">Total Portfolio</span>
+                    <span class="capacity-row-value"><span id="capacityUsed">--</span> / <span id="capacityMax">--</span></span>
+                </div>
+                <div class="capacity-bar">
+                    <div class="capacity-fill capacity-fill--total" id="capacityFill" style="width: 0%;"></div>
+                </div>
+                <div class="capacity-footer">
+                    <span class="capacity-used">All positions</span>
+                    <span class="capacity-remaining"><span id="capacityRemaining">--</span> left</span>
+                </div>
             </div>
         </div>
 

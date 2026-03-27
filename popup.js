@@ -3,6 +3,53 @@ const TEST_MODE = false;
 let traderLimits = null;
 let refreshIntervalId = null;
 let hlBalance = 0;
+let dashboardShown = false;
+
+// Load cached response from background
+async function getCachedData(key) {
+    try {
+        const entry = await safeSendMessage({ action: 'getCache', key });
+        return entry; // { data, timestamp } or null
+    } catch {
+        return null;
+    }
+}
+
+// Restore UI from cache instantly — called before live fetches
+async function restoreFromCache() {
+    if (!storedAddress) return;
+    const addr = storedAddress.toLowerCase();
+
+    const [balanceCache, validatorCache, limitsCache, eventsCache] = await Promise.all([
+        getCachedData(`cache_balance_${addr}`),
+        getCachedData(`cache_validator_${addr}`),
+        getCachedData(`cache_limits_${addr}`),
+        getCachedData(`cache_events_${addr}`),
+    ]);
+
+    // Restore balance
+    if (balanceCache?.data) {
+        hlBalance = balanceCache.data.perpAccountValue || balanceCache.data.accountValue;
+        const hlBalanceEl = document.getElementById('hlBalance');
+        if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(hlBalance);
+    }
+
+    // Restore validator data (this is what triggers showDashboard)
+    if (validatorCache?.data && validatorCache.data.status === 'success') {
+        applyValidatorData(validatorCache.data);
+    }
+
+    // Restore limits
+    if (limitsCache?.data) {
+        traderLimits = limitsCache.data;
+    }
+
+    // Restore events
+    if (eventsCache?.data) {
+        const events = eventsCache.data.events || [];
+        if (events.length > 0) renderEvents(events);
+    }
+}
 
 // Safe wrapper for chrome.runtime.sendMessage — silently fails if context is gone
 function safeSendMessage(msg) {
@@ -56,6 +103,135 @@ async function refreshBalance() {
     }
 }
 
+// Apply validator data to the UI (used by both cache restore and live refresh)
+function applyValidatorData(result) {
+    const accountSize = result.account_size || 0;
+    const positionsRaw = result.positions;
+    const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
+    const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
+
+    let totalUnrealizedPnl = 0;
+    let totalNotional = 0;
+    let maxSingleNotional = 0;
+
+    for (const pos of openPositions) {
+        const notional = pos.net_leverage != null
+            ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
+            : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
+        const pnl = ((parseFloat(pos.current_return) || 1) - 1) * accountSize;
+
+        totalUnrealizedPnl += pnl;
+        totalNotional += notional;
+        if (notional > maxSingleNotional) maxSingleNotional = notional;
+    }
+
+    const cp = result.challenge_period || {};
+    const dd = result.drawdown || {};
+    const currentEquity = parseFloat(dd.current_equity) || 1;
+    const validatorEquity = accountSize * currentEquity;
+    const returnsPct = (currentEquity - 1) * 100;
+    const targetPct = CHALLENGE_TARGET;
+    const challengeCompletionPct = targetPct > 0 ? Math.min((returnsPct / targetPct) * 100, 100) : 0;
+    const inChallenge = cp.bucket !== 'SUBACCOUNT_FUNDED';
+
+    const drawdownPct = parseFloat(dd.intraday_drawdown_pct) || 0;
+    const drawdownLimitPct = parseFloat(dd.intraday_threshold_pct) || DRAWDOWN_MAX;
+    const drawdownUsagePct = parseFloat(dd.intraday_usage_pct) || 0;
+
+    const fundedBalanceEl = document.getElementById('fundedBalance');
+    if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(validatorEquity);
+    const hlBalanceHeaderEl = document.getElementById('hlBalanceHeader');
+    if (hlBalanceHeaderEl) hlBalanceHeaderEl.textContent = fmtUsd(validatorEquity);
+
+    const fundedChangeEl = document.getElementById('fundedChange');
+    if (fundedChangeEl) {
+        const sign = totalUnrealizedPnl >= 0 ? '+' : '';
+        const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
+        fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${sign}${pnlPct.toFixed(2)}%)`;
+        const changeParent = fundedChangeEl.closest('.balance-change');
+        if (changeParent) {
+            changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
+        }
+    }
+
+    const statusBadge = document.querySelector('.status-badge');
+    if (statusBadge) {
+        statusBadge.textContent = inChallenge ? 'In Challenge' : 'Funded';
+    }
+
+    const challengeValueEl = document.getElementById('challengeValue');
+    const challengeFillEl = document.getElementById('challengeFill');
+    const challengeLabelEl = document.getElementById('challengeLabel');
+    if (challengeValueEl) challengeValueEl.textContent = `${returnsPct.toFixed(2)}% / ${targetPct}%`;
+    if (challengeFillEl) {
+        challengeFillEl.style.width = Math.min(challengeCompletionPct, 100) + '%';
+    }
+    if (challengeLabelEl) {
+        const remainingPct = targetPct - returnsPct;
+        const remainingDollar = accountSize * (remainingPct / 100);
+        challengeLabelEl.textContent = remainingPct > 0
+            ? `${fmtUsd(remainingDollar)} to target (${targetPct}% goal)`
+            : 'Target reached!';
+    }
+
+    const drawdownValueEl = document.getElementById('drawdownValue');
+    const drawdownFillEl = document.getElementById('drawdownFill');
+    const drawdownLabelEl = document.getElementById('drawdownLabel');
+    if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownPct.toFixed(3)}% / ${drawdownLimitPct.toFixed(0)}%`;
+    if (drawdownFillEl) {
+        drawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
+        drawdownFillEl.style.background = drawdownUsagePct > 80 ? 'var(--red)' : drawdownUsagePct > 50 ? 'var(--amber)' : '';
+    }
+    if (drawdownLabelEl) {
+        const bufferPct = drawdownLimitPct - drawdownPct;
+        const bufferDollar = accountSize * (bufferPct / 100);
+        drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer (${bufferPct.toFixed(2)}%)`;
+    }
+
+    const perPairLevCap = inChallenge ? 0.625 : 2.5;
+    const totalLevCap   = inChallenge ? 1.25  : 5;
+    const basisUsd = hlBalance;
+
+    let maxPerPair = basisUsd * perPairLevCap;
+    let maxTotal   = basisUsd * totalLevCap;
+
+    if (traderLimits) {
+        const backendPair = parseFloat(traderLimits.max_position_per_pair_usd) || 0;
+        const backendTotal = parseFloat(traderLimits.max_portfolio_usd) || 0;
+        if (backendPair > 0) maxPerPair = Math.min(maxPerPair, backendPair);
+        if (backendTotal > 0) maxTotal = Math.min(maxTotal, backendTotal);
+    }
+
+    const largestPairNotional = maxSingleNotional;
+    const perPairUsedEl = document.getElementById('perPairUsed');
+    const perPairMaxEl = document.getElementById('perPairMax');
+    const perPairFillEl = document.getElementById('perPairFill');
+    const perPairRemainingEl = document.getElementById('perPairRemaining');
+    if (perPairUsedEl) perPairUsedEl.textContent = fmtUsd(largestPairNotional);
+    if (perPairMaxEl) perPairMaxEl.textContent = fmtUsd(maxPerPair);
+    if (perPairFillEl) {
+        const ppPct = maxPerPair > 0 ? Math.min((largestPairNotional / maxPerPair) * 100, 100) : 0;
+        perPairFillEl.style.width = ppPct + '%';
+    }
+    if (perPairRemainingEl) perPairRemainingEl.textContent = fmtUsd(Math.max(maxPerPair - largestPairNotional, 0));
+
+    const capacityUsedEl = document.getElementById('capacityUsed');
+    const capacityMaxEl = document.getElementById('capacityMax');
+    const capacityFillEl = document.getElementById('capacityFill');
+    const capacityRemainingEl = document.getElementById('capacityRemaining');
+    if (capacityUsedEl) capacityUsedEl.textContent = fmtUsd(totalNotional);
+    if (capacityMaxEl) capacityMaxEl.textContent = fmtUsd(maxTotal);
+    if (capacityFillEl) {
+        const capPct = maxTotal > 0 ? Math.min((totalNotional / maxTotal) * 100, 100) : 0;
+        capacityFillEl.style.width = capPct + '%';
+    }
+    if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalNotional, 0));
+
+    renderPositions(openPositions, accountSize);
+    showDashboard();
+    dashboardShown = true;
+}
+
 // Fetch validator data and update all dynamic UI elements
 async function refreshValidatorData() {
     if (!storedAddress) return;
@@ -65,142 +241,22 @@ async function refreshValidatorData() {
 
         if (result.status !== 'success') {
             console.warn('[Hyperscaled Popup] Validator returned non-success status:', result.status);
-            hideDashboard();
-            showUnregistered();
+            if (!dashboardShown) {
+                hideDashboard();
+                showUnregistered();
+            }
             return;
         }
 
-        const accountSize = result.account_size || 0;
-        // Positions are already transformed: {positions: [...]}
-        const positionsRaw = result.positions;
-        const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
-        const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
-
-        // Compute PnL from positions
-        let totalUnrealizedPnl = 0;
-        let totalNotional = 0;
-        let maxSingleNotional = 0;
-
-        for (const pos of openPositions) {
-            const notional = pos.net_leverage != null
-                ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
-                : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
-            const pnl = ((parseFloat(pos.current_return) || 1) - 1) * accountSize;
-
-            totalUnrealizedPnl += pnl;
-            totalNotional += notional;
-            if (notional > maxSingleNotional) maxSingleNotional = notional;
-        }
-
-        // Challenge status from API
-        const cp = result.challenge_period || {};
-        const dd = result.drawdown || {};
-        const currentEquity = parseFloat(dd.current_equity) || 1;
-        const validatorEquity = accountSize * currentEquity;
-        const returnsPct = (currentEquity - 1) * 100;
-        const targetPct = CHALLENGE_TARGET;
-        const challengeCompletionPct = targetPct > 0 ? Math.min((returnsPct / targetPct) * 100, 100) : 0;
-        const inChallenge = cp.bucket !== 'SUBACCOUNT_FUNDED';
-
-        // Drawdown from API
-        const drawdownPct = parseFloat(dd.intraday_drawdown_pct) || 0;
-        const drawdownLimitPct = parseFloat(dd.intraday_threshold_pct) || DRAWDOWN_MAX;
-        const drawdownUsagePct = parseFloat(dd.intraday_usage_pct) || 0;
-
-        // Funded balance (current equity from validator: account_size * current_equity)
-        const fundedBalanceEl = document.getElementById('fundedBalance');
-        if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(validatorEquity);
-        const hlBalanceHeaderEl = document.getElementById('hlBalanceHeader');
-        if (hlBalanceHeaderEl) hlBalanceHeaderEl.textContent = fmtUsd(validatorEquity);
-
-        // Funded change
-        const fundedChangeEl = document.getElementById('fundedChange');
-        if (fundedChangeEl) {
-            const sign = totalUnrealizedPnl >= 0 ? '+' : '';
-            const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
-            fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${sign}${pnlPct.toFixed(2)}%)`;
-            const changeParent = fundedChangeEl.closest('.balance-change');
-            if (changeParent) {
-                changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
-            }
-        }
-
-        // Status badge
-        const statusBadge = document.querySelector('.status-badge');
-        if (statusBadge) {
-            statusBadge.textContent = inChallenge ? 'In Challenge' : 'Funded';
-        }
-
-        // Challenge progress
-        const challengeValueEl = document.getElementById('challengeValue');
-        const challengeFillEl = document.getElementById('challengeFill');
-        const challengeLabelEl = document.getElementById('challengeLabel');
-        if (challengeValueEl) challengeValueEl.textContent = `${returnsPct.toFixed(2)}% / ${targetPct}%`;
-        if (challengeFillEl) {
-            challengeFillEl.style.width = Math.min(challengeCompletionPct, 100) + '%';
-        }
-        if (challengeLabelEl) {
-            const remainingPct = targetPct - returnsPct;
-            const remainingDollar = accountSize * (remainingPct / 100);
-            challengeLabelEl.textContent = remainingPct > 0
-                ? `${fmtUsd(remainingDollar)} to target (${targetPct}% goal)`
-                : 'Target reached!';
-        }
-
-        // Drawdown
-        const drawdownValueEl = document.getElementById('drawdownValue');
-        const drawdownFillEl = document.getElementById('drawdownFill');
-        const drawdownLabelEl = document.getElementById('drawdownLabel');
-        if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownPct.toFixed(3)}% / ${drawdownLimitPct.toFixed(0)}%`;
-        if (drawdownFillEl) {
-            drawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
-            drawdownFillEl.style.background = drawdownUsagePct > 80 ? 'var(--red)' : drawdownUsagePct > 50 ? 'var(--amber)' : '';
-        }
-        if (drawdownLabelEl) {
-            const bufferPct = drawdownLimitPct - drawdownPct;
-            const bufferDollar = accountSize * (bufferPct / 100);
-            drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer (${bufferPct.toFixed(2)}%)`;
-        }
-
-        // Capacity — per pair (based on HL available balance)
-        const maxPerPair = hlBalance * 0.625;
-        const largestPairNotional = maxSingleNotional;
-        const perPairUsedEl = document.getElementById('perPairUsed');
-        const perPairMaxEl = document.getElementById('perPairMax');
-        const perPairFillEl = document.getElementById('perPairFill');
-        const perPairRemainingEl = document.getElementById('perPairRemaining');
-        if (perPairUsedEl) perPairUsedEl.textContent = fmtUsd(largestPairNotional);
-        if (perPairMaxEl) perPairMaxEl.textContent = fmtUsd(maxPerPair);
-        if (perPairFillEl) {
-            const ppPct = maxPerPair > 0 ? Math.min((largestPairNotional / maxPerPair) * 100, 100) : 0;
-            perPairFillEl.style.width = ppPct + '%';
-        }
-        if (perPairRemainingEl) perPairRemainingEl.textContent = fmtUsd(Math.max(maxPerPair - largestPairNotional, 0));
-
-        // Capacity — portfolio total (based on HL available balance)
-        const maxTotal = hlBalance * 1.25;
-        const capacityUsedEl = document.getElementById('capacityUsed');
-        const capacityMaxEl = document.getElementById('capacityMax');
-        const capacityFillEl = document.getElementById('capacityFill');
-        const capacityRemainingEl = document.getElementById('capacityRemaining');
-        if (capacityUsedEl) capacityUsedEl.textContent = fmtUsd(totalNotional);
-        if (capacityMaxEl) capacityMaxEl.textContent = fmtUsd(maxTotal);
-        if (capacityFillEl) {
-            const capPct = maxTotal > 0 ? Math.min((totalNotional / maxTotal) * 100, 100) : 0;
-            capacityFillEl.style.width = capPct + '%';
-        }
-        if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalNotional, 0));
-
-        // Positions
-        renderPositions(openPositions, accountSize);
-
-        // Data loaded successfully — show the dashboard
-        showDashboard();
+        applyValidatorData(result);
 
     } catch (e) {
         console.error('[Hyperscaled Popup] Validator data fetch failed:', e.message, e);
-        hideDashboard();
-        showUnregistered();
+        // Only hide dashboard if we never showed it from cache
+        if (!dashboardShown) {
+            hideDashboard();
+            showUnregistered();
+        }
     }
 }
 
@@ -345,10 +401,12 @@ function renderEvents(events) {
         return;
     }
 
-    if (countEl) countEl.textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+    // Filter out rate-limited events and show most recent first, limit to 20
+    const filtered = events.filter(evt => !evt.error_message || !evt.error_message.toLowerCase().includes('rate limited'));
 
-    // Show most recent first, limit to 20 in the popup
-    const display = events
+    if (countEl) countEl.textContent = `${filtered.length} event${filtered.length !== 1 ? 's' : ''}`;
+
+    const display = filtered
         .sort((a, b) => b.timestamp_ms - a.timestamp_ms)
         .slice(0, 20);
 
@@ -446,6 +504,14 @@ function hideUnregistered() {
 }
 
 function disconnectWallet() {
+    // Clear cached API responses along with user data
+    if (storedAddress) {
+        const addr = storedAddress.toLowerCase();
+        chrome.storage.local.remove([
+            `cache_balance_${addr}`, `cache_validator_${addr}`,
+            `cache_limits_${addr}`, `cache_events_${addr}`
+        ]);
+    }
     chrome.storage.local.remove(['hlAddress', 'lastEventTimestampMs', 'recentEvents']);
     storedAddress = null;
     traderLimits = null;
@@ -759,8 +825,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
-    // ── Permissions & notifications ────────────────────────
-    await checkNotificationPermission();
+    // ── Permissions & notifications (non-blocking) ─────────
+    checkNotificationPermission();
 
     setTimeout(() => {
         showPositionNotification();
@@ -783,8 +849,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
-    // ── Periodic data refresh ───────────────────────────────
+    // ── Restore cached data instantly, then refresh live ────
     console.log('[Hyperscaled Popup] Starting data refresh, storedAddress:', storedAddress);
+    dashboardShown = false;
+    await restoreFromCache();
+    // Fire live refreshes in parallel (don't await — they update UI when done)
     refreshBalance();
     refreshValidatorData();
     refreshTraderLimits();

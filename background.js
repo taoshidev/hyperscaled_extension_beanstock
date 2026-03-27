@@ -11,6 +11,28 @@ const HL_APP_URL = TEST_MODE ? "https://app.hyperliquid-testnet.xyz" : "https://
 // Cache for resolved entity endpoint URLs (hl_address -> endpoint_url)
 let entityEndpointCache = {};
 
+// ── Response cache with TTL ────────────────────────────────────────────────
+// Cache keys: 'cache_balance_{addr}', 'cache_validator_{addr}', 'cache_limits_{addr}', 'cache_events_{addr}'
+const CACHE_TTL_MS = 30000; // 30 seconds — data older than this triggers a live refresh
+
+async function getCachedResponse(key) {
+  const result = await chrome.storage.local.get([key]);
+  const entry = result[key];
+  if (!entry) return null;
+  return entry; // { data, timestamp }
+}
+
+async function setCachedResponse(key, data) {
+  await chrome.storage.local.set({ [key]: { data, timestamp: Date.now() } });
+}
+
+// Fetch with a timeout to prevent hanging
+function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 // Listen for extension icon clicks
 chrome.action.onClicked.addListener((tab) => {
   showPositionNotification();
@@ -36,6 +58,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'showPositionNotification') {
     showPositionNotification();
     sendResponse({ success: true });
+    return true;
+  }
+
+  if (request.action === 'getCache') {
+    getCachedResponse(request.key)
+      .then(entry => sendResponse({ success: true, data: entry }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
@@ -423,7 +452,7 @@ async function resolveEntityEndpoint(hlAddress) {
   const lookupUrl = `${VALIDATOR_URL}/entity/endpoint?hl_address=${hlAddress}`;
   console.log('[Hyperscaled BG] Resolving entity endpoint:', lookupUrl);
 
-  const res = await fetch(lookupUrl);
+  const res = await fetchWithTimeout(lookupUrl);
   console.log('[Hyperscaled BG] Entity endpoint response status:', res.status);
 
   if (!res.ok) {
@@ -454,7 +483,7 @@ async function fetchEvents(hlAddress, since) {
   }
   console.log('[Hyperscaled BG] Fetching events from:', url);
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   console.log('[Hyperscaled BG] Events response status:', res.status);
 
   if (!res.ok) {
@@ -465,6 +494,7 @@ async function fetchEvents(hlAddress, since) {
 
   const data = await res.json();
   console.log('[Hyperscaled BG] Events received:', data.count ?? data.events?.length ?? 0, 'events');
+  setCachedResponse(`cache_events_${hlAddress.toLowerCase()}`, data);
   return data;
 }
 
@@ -545,9 +575,12 @@ async function fetchTradePairs() {
 
 // Fetch trader limits from validator endpoint
 async function fetchTraderLimits(address) {
-  const res = await fetch(`${VALIDATOR_URL}/hl-traders/${address}/limits`);
+  const cacheKey = `cache_limits_${address.toLowerCase()}`;
+  const res = await fetchWithTimeout(`${VALIDATOR_URL}/hl-traders/${address}/limits`);
   if (!res.ok) throw new Error(`Validator limits API error ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  setCachedResponse(cacheKey, data);
+  return data;
 }
 
 // Transform the new /hl-traders/<address> response into a flat shape
@@ -630,7 +663,8 @@ function transformTraderResponse(raw) {
 // Fetch trader data from validator endpoint
 async function fetchValidatorData(address) {
   const normalizedAddress = address.toLowerCase();
-  const res = await fetch(`${VALIDATOR_URL}/hl-traders/${normalizedAddress}`);
+  const cacheKey = `cache_validator_${normalizedAddress}`;
+  const res = await fetchWithTimeout(`${VALIDATOR_URL}/hl-traders/${normalizedAddress}`);
   if (!res.ok) throw new Error(`Validator API error ${res.status}`);
   const raw = await res.json();
   const result = transformTraderResponse(raw);
@@ -642,6 +676,7 @@ async function fetchValidatorData(address) {
     return { status: 'not_registered' };
   }
 
+  setCachedResponse(cacheKey, result);
   return result;
 }
 
@@ -651,12 +686,12 @@ async function fetchHLBalance(address) {
 
   // Fetch perps and spot state in parallel
   const [perpsRes, spotRes] = await Promise.all([
-    fetch(HL_API_URL + '/info', {
+    fetchWithTimeout(HL_API_URL + '/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'clearinghouseState', user: address })
     }),
-    fetch(HL_API_URL + '/info', {
+    fetchWithTimeout(HL_API_URL + '/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'spotClearinghouseState', user: address })
@@ -699,7 +734,7 @@ async function fetchHLBalance(address) {
 
   console.log('[Hyperscaled BG] total accountValue:', accountValue);
 
-  return {
+  const balanceData = {
     accountValue,
     perpAccountValue,
     perpsValue,
@@ -707,6 +742,8 @@ async function fetchHLBalance(address) {
     totalMarginUsed: parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0,
     totalNtlPos: parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0,
   };
+  setCachedResponse(`cache_balance_${address.toLowerCase()}`, balanceData);
+  return balanceData;
 }
 
 // Fetch mid prices for all assets from Hyperliquid

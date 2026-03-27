@@ -14,14 +14,36 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 <div class="capacity-block">
     <div class="capacity-header">
         <span class="capacity-title">Trading Capacity</span>
-        <span class="capacity-badge">62.5% / 125%</span>
     </div>
-    <div class="capacity-bar">
-        <div class="capacity-fill capacity-fill--total" style="width: 11.4%;"></div>
+
+    <!-- Per-asset row -->
+    <div class="capacity-row">
+        <div class="capacity-row-header">
+            <span class="capacity-row-label">Per Asset</span>
+            <span class="capacity-row-value">$234.50 / $1,250.00</span>
+        </div>
+        <div class="capacity-bar">
+            <div class="capacity-fill capacity-fill--pair" style="width: 18.8%;"></div>
+        </div>
+        <div class="capacity-footer">
+            <span class="capacity-used">Largest position</span>
+            <span class="capacity-remaining">$1,015.50 left</span>
+        </div>
     </div>
-    <div class="capacity-footer">
-        <span class="capacity-used">$234.50 used</span>
-        <span class="capacity-remaining">$1,822.59 left</span>
+
+    <!-- Total portfolio row -->
+    <div class="capacity-row">
+        <div class="capacity-row-header">
+            <span class="capacity-row-label">Total Portfolio</span>
+            <span class="capacity-row-value">$468.00 / $2,500.00</span>
+        </div>
+        <div class="capacity-bar">
+            <div class="capacity-fill capacity-fill--total" style="width: 18.7%;"></div>
+        </div>
+        <div class="capacity-footer">
+            <span class="capacity-used">All positions</span>
+            <span class="capacity-remaining">$2,032.00 left</span>
+        </div>
     </div>
 </div>
 ```
@@ -32,10 +54,12 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 |---------|----------|---------------|
 | Title | Font size / weight | `12px / 600` |
 | Title | Color | `--text-strong` |
-| Limits badge | Border | `--border-card` |
-| Limits badge | Color | `--text-ghost` |
-| Limits badge | Padding | `2px 6px` |
-| Limits badge | Border radius | `4px` |
+| Row label | Font size / weight | `11px / 500` |
+| Row label | Color | `--text-faint` |
+| Row label | Text transform | `uppercase`, `letter-spacing: 0.03em` |
+| Row value | Font size | `11px` |
+| Row value | Font family | `--font-mono` |
+| Row value | Color | `--text-secondary` |
 | Bar track | Background | `--indigo-bg` |
 | Bar fill | Background | `--indigo` (flat, no gradient) |
 | Bar height | — | `10px` |
@@ -47,9 +71,9 @@ A header-bar-footer layout displaying the trader's used vs. remaining position c
 ### Rules
 
 - Never use teal or amber for this bar — indigo keeps capacity visually separate from P&L and challenge indicators.
-- Footer is always `$X used` left, `$X left` right. No "of $total" format.
+- Two rows: "Per Asset" (largest single position vs per-pair max) and "Total Portfolio" (all positions vs portfolio max).
+- Row value format is `$used / $max`. Footer left describes what's measured, footer right shows `$X left`.
 - Bar fill width is set inline via `style="width: XX%;"` calculated from JS.
-- Per-pair IDs are retained in a hidden div for JS compatibility.
 
 ---
 
