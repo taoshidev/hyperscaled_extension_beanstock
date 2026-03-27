@@ -30,6 +30,10 @@
     drawdownMax: 5,
     daily_loss_pct: 0,
     eod_trailing_loss_pct: 0,
+    intraday_usage_pct: 0,
+    eod_usage_pct: 0,
+    intraday_threshold_pct: 5,
+    eod_threshold_pct: 5,
     openSingleUsed: 0,
     openTotalUsed: 0,
     maxPositionPerPair: 0,
@@ -61,20 +65,20 @@
 
   // ── Banner HTML ────────────────────────────────────────────────────────────
 
-  function ddColor(val) {
-    if (val >= 5) return 'var(--red)';
-    if (val >= 4) return 'var(--amber)';
+  function ddColor(usagePct) {
+    if (usagePct >= 100) return 'var(--red)';
+    if (usagePct > 80) return 'var(--amber)';
     return 'var(--accent)';
   }
 
-  function ddBadgeState(val) {
-    if (val >= 5) return { label: 'Breached', cls: 'hf-dd-panel-badge--red' };
-    if (val >= 4) return { label: 'Warning', cls: 'hf-dd-panel-badge--amber' };
+  function ddBadgeState(usagePct) {
+    if (usagePct >= 100) return { label: 'Breached', cls: 'hf-dd-panel-badge--red' };
+    if (usagePct > 80) return { label: 'Warning', cls: 'hf-dd-panel-badge--amber' };
     return { label: 'Safe', cls: 'hf-dd-panel-badge--accent' };
   }
 
-  function ddWarn(val) {
-    return val >= 4 ? ' ⚠' : '';
+  function ddWarn(usagePct) {
+    return usagePct > 80 ? ' ⚠' : '';
   }
 
   function targetColor(val) {
@@ -108,14 +112,18 @@
   }
 
   function updateDdPanel() {
+    const dailyUsage = ACCOUNT.intraday_usage_pct || 0;
+    const trailingUsage = ACCOUNT.eod_usage_pct || 0;
     const daily = ACCOUNT.daily_loss_pct || 0;
     const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
+    const intradayLimit = ACCOUNT.intraday_threshold_pct || 5;
+    const eodLimit = ACCOUNT.eod_threshold_pct || 5;
     const equity = ACCOUNT.hlBalance || 0;
 
     // Daily badge
     const dailyBadge = document.getElementById('hf-dd-daily-badge');
     if (dailyBadge) {
-      const ds = ddBadgeState(daily);
+      const ds = ddBadgeState(dailyUsage);
       dailyBadge.textContent = ds.label;
       dailyBadge.className = 'hf-dd-panel-badge ' + ds.cls;
     }
@@ -123,7 +131,7 @@
     // Trailing badge
     const trailingBadge = document.getElementById('hf-dd-trailing-badge');
     if (trailingBadge) {
-      const ts = ddBadgeState(trailing);
+      const ts = ddBadgeState(trailingUsage);
       trailingBadge.textContent = ts.label;
       trailingBadge.className = 'hf-dd-panel-badge ' + ts.cls;
     }
@@ -132,32 +140,36 @@
     const dayOpen = document.getElementById('hf-dd-day-open');
     if (dayOpen) dayOpen.textContent = fmt(equity);
     const dailyBreach = document.getElementById('hf-dd-daily-breach');
-    if (dailyBreach) dailyBreach.textContent = fmt(equity * 0.95);
+    if (dailyBreach) dailyBreach.textContent = fmt(equity * (1 - intradayLimit / 100));
     const dailyLoss = document.getElementById('hf-dd-daily-loss');
     if (dailyLoss) dailyLoss.textContent = fmt(equity * daily / 100) + ' (' + daily.toFixed(2) + '%)';
     const dailyBuffer = document.getElementById('hf-dd-daily-buffer');
-    if (dailyBuffer) dailyBuffer.textContent = fmt(equity * (5 - daily) / 100);
+    if (dailyBuffer) dailyBuffer.textContent = fmt(equity * (intradayLimit - daily) / 100);
 
     // Trailing column values
     const hwm = document.getElementById('hf-dd-hwm');
     if (hwm) hwm.textContent = fmt(equity);
     const trailingBreach = document.getElementById('hf-dd-trailing-breach');
-    if (trailingBreach) trailingBreach.textContent = fmt(equity * 0.95);
+    if (trailingBreach) trailingBreach.textContent = fmt(equity * (1 - eodLimit / 100));
     const trailingLoss = document.getElementById('hf-dd-trailing-loss');
     if (trailingLoss) trailingLoss.textContent = fmt(equity * trailing / 100) + ' (' + trailing.toFixed(2) + '%)';
     const trailingBuffer = document.getElementById('hf-dd-trailing-buffer');
-    if (trailingBuffer) trailingBuffer.textContent = fmt(equity * (5 - trailing) / 100);
+    if (trailingBuffer) trailingBuffer.textContent = fmt(equity * (eodLimit - trailing) / 100);
   }
 
   function getBannerHTML() {
+    const dailyUsage = ACCOUNT.intraday_usage_pct || 0;
+    const trailingUsage = ACCOUNT.eod_usage_pct || 0;
     const daily = ACCOUNT.daily_loss_pct || 0;
     const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
+    const intradayLimit = ACCOUNT.intraday_threshold_pct || 5;
+    const eodLimit = ACCOUNT.eod_threshold_pct || 5;
     const target = ACCOUNT.challengeCurrent || 0;
     const targetMax = ACCOUNT.challengeTarget || 10;
     const targetPct = targetMax > 0 ? Math.max(0, Math.min((target / targetMax) * 100, 100)) : 0;
     const equity = ACCOUNT.hlBalance || 0;
     const isDisabled = shouldBlockTrade;
-    const isWarning = daily >= 4 || trailing >= 4;
+    const isWarning = dailyUsage > 80 || trailingUsage > 80;
 
     return `
       <div class="hf-bar">
@@ -183,15 +195,15 @@
         <div class="hf-dd-stack hf-dd-trigger" id="hf-dd-trigger">
           <div class="hf-dd-row">
             <span class="hf-dd-label">DAILY</span>
-            <span class="hf-dd-value" id="hf-daily" style="color:${ddColor(daily)} !important">${daily.toFixed(2)}%</span>
-            <span class="hf-dd-suffix">/ 5.00%</span>
-            ${daily >= 4 ? `<span class="hf-dd-warn" style="color:${ddColor(daily)} !important">⚠</span>` : ''}
+            <span class="hf-dd-value" id="hf-daily" style="color:${ddColor(dailyUsage)} !important">${dailyUsage.toFixed(1)}%</span>
+            <span class="hf-dd-suffix">/ ${intradayLimit.toFixed(0)}%</span>
+            ${dailyUsage > 80 ? `<span class="hf-dd-warn" style="color:${ddColor(dailyUsage)} !important">⚠</span>` : ''}
           </div>
           <div class="hf-dd-row">
             <span class="hf-dd-label">TRAILING</span>
-            <span class="hf-dd-value" id="hf-trailing" style="color:${ddColor(trailing)} !important">${trailing.toFixed(2)}%</span>
-            <span class="hf-dd-suffix">/ 5.00%</span>
-            ${trailing >= 4 ? `<span class="hf-dd-warn" style="color:${ddColor(trailing)} !important">⚠</span>` : ''}
+            <span class="hf-dd-value" id="hf-trailing" style="color:${ddColor(trailingUsage)} !important">${trailingUsage.toFixed(1)}%</span>
+            <span class="hf-dd-suffix">/ ${eodLimit.toFixed(0)}%</span>
+            ${trailingUsage > 80 ? `<span class="hf-dd-warn" style="color:${ddColor(trailingUsage)} !important">⚠</span>` : ''}
           </div>
         </div>
 
@@ -205,28 +217,28 @@
             <div class="hf-dd-panel-col">
               <div class="hf-dd-panel-col-header">
                 <span class="hf-dd-panel-dot" style="background:var(--indigo) !important"></span>
-                <span class="hf-dd-panel-col-title">RULE 1 — DAILY LOSS LIMIT (5.00%)</span>
+                <span class="hf-dd-panel-col-title">RULE 1 — DAILY LOSS LIMIT (${intradayLimit.toFixed(2)}%)</span>
                 <span class="hf-dd-panel-badge" id="hf-dd-daily-badge">Safe</span>
               </div>
               <div class="hf-dd-panel-rows">
                 <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Day open equity</span><span class="hf-dd-panel-val" id="hf-dd-day-open">${fmt(equity)}</span></div>
-                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-daily-breach">${fmt(equity * 0.95)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-daily-breach">${fmt(equity * (1 - intradayLimit / 100))}</span></div>
                 <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Current loss</span><span class="hf-dd-panel-val" id="hf-dd-daily-loss">${fmt(equity * daily / 100)} (${daily.toFixed(2)}%)</span></div>
-                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-daily-buffer">${fmt(equity * (5 - daily) / 100)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-daily-buffer">${fmt(equity * (intradayLimit - daily) / 100)}</span></div>
               </div>
               <div class="hf-dd-panel-note">Checked intraday in real-time. Resets 00:00 UTC.</div>
             </div>
             <div class="hf-dd-panel-col">
               <div class="hf-dd-panel-col-header">
                 <span class="hf-dd-panel-dot" style="background:var(--amber) !important"></span>
-                <span class="hf-dd-panel-col-title">RULE 2 — EOD TRAILING LOSS LIMIT (5.00%)</span>
+                <span class="hf-dd-panel-col-title">RULE 2 — EOD TRAILING LOSS LIMIT (${eodLimit.toFixed(2)}%)</span>
                 <span class="hf-dd-panel-badge" id="hf-dd-trailing-badge">Safe</span>
               </div>
               <div class="hf-dd-panel-rows">
                 <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">EOD high water mark</span><span class="hf-dd-panel-val" id="hf-dd-hwm">${fmt(equity)}</span></div>
-                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-trailing-breach">${fmt(equity * 0.95)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Breach level</span><span class="hf-dd-panel-val hf-dd-panel-val--red" id="hf-dd-trailing-breach">${fmt(equity * (1 - eodLimit / 100))}</span></div>
                 <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Drawdown from HWM</span><span class="hf-dd-panel-val" id="hf-dd-trailing-loss">${fmt(equity * trailing / 100)} (${trailing.toFixed(2)}%)</span></div>
-                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-trailing-buffer">${fmt(equity * (5 - trailing) / 100)}</span></div>
+                <div class="hf-dd-panel-row"><span class="hf-dd-panel-key">Buffer remaining</span><span class="hf-dd-panel-val hf-dd-panel-val--accent" id="hf-dd-trailing-buffer">${fmt(equity * (eodLimit - trailing) / 100)}</span></div>
               </div>
               <div class="hf-dd-panel-note">Checked at end of day. HWM trails upward with equity gains.</div>
             </div>
@@ -658,6 +670,10 @@
       ACCOUNT.drawdownMax = parseFloat(dd.intraday_threshold_pct) || ACCOUNT.drawdownMax;
       ACCOUNT.daily_loss_pct = parseFloat(dd.intraday_drawdown_pct) || 0;
       ACCOUNT.eod_trailing_loss_pct = parseFloat(dd.eod_drawdown_pct) || 0;
+      ACCOUNT.intraday_usage_pct = parseFloat(dd.intraday_usage_pct) || 0;
+      ACCOUNT.eod_usage_pct = parseFloat(dd.eod_usage_pct) || 0;
+      ACCOUNT.intraday_threshold_pct = parseFloat(dd.intraday_threshold_pct) || ACCOUNT.intraday_threshold_pct;
+      ACCOUNT.eod_threshold_pct = parseFloat(dd.eod_threshold_pct) || ACCOUNT.eod_threshold_pct;
 
       ACCOUNT.openTotalUsed = totalNotional;
       ACCOUNT.openSingleUsed = maxSingleNotional;
@@ -674,12 +690,12 @@
   }
 
   function applyBannerStateClasses(banner) {
-    const daily = ACCOUNT.daily_loss_pct || 0;
-    const trailing = ACCOUNT.eod_trailing_loss_pct || 0;
+    const dailyUsage = ACCOUNT.intraday_usage_pct || 0;
+    const trailingUsage = ACCOUNT.eod_usage_pct || 0;
     banner.classList.remove('hf-disabled', 'hf-warning');
     if (shouldBlockTrade) {
       banner.classList.add('hf-disabled');
-    } else if (daily >= 4 || trailing >= 4) {
+    } else if (dailyUsage > 80 || trailingUsage > 80) {
       banner.classList.add('hf-warning');
     }
   }

@@ -639,33 +639,37 @@ async function fetchValidatorData(address) {
 async function fetchHLBalance(address) {
   console.log('[Hyperscaled BG] fetchHLBalance called for', address);
 
-  // Fetch perps state
-  const perpsRes = await fetch(HL_API_URL + '/info', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'clearinghouseState', user: address })
-  });
-  if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
-  const perpsData = await perpsRes.json();
-  // Use withdrawable (pure USDC collateral) not accountValue (which includes unrealized PnL)
-  const perpsWithdrawable = parseFloat(perpsData?.withdrawable) || 0;
-  console.log('[Hyperscaled BG] perpsWithdrawable:', perpsWithdrawable);
-
-  // Fetch spot state (non-blocking — if this fails, just use perps)
-  let spotUSDC = 0;
-  try {
-    const spotRes = await fetch(HL_API_URL + '/info', {
+  // Fetch perps and spot state in parallel
+  const [perpsRes, spotRes] = await Promise.all([
+    fetch(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'clearinghouseState', user: address })
+    }),
+    fetch(HL_API_URL + '/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'spotClearinghouseState', user: address })
-    });
+    })
+  ]);
+
+  if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
+  const perpsData = await perpsRes.json();
+  const perpAccountValue = parseFloat(perpsData?.crossMarginSummary?.accountValue ?? 0);
+  const perpMarginUsed = parseFloat(perpsData?.crossMarginSummary?.totalMarginUsed ?? 0);
+  const perpsWithdrawable = Math.max(0, perpAccountValue - perpMarginUsed);
+  console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, 'perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
+
+  // Get spot USDC (total minus hold, which is committed to perp margin)
+  let spotUSDC = 0;
+  try {
     if (spotRes.ok) {
       const spotData = await spotRes.json();
       const balances = spotData?.balances || [];
       for (const b of balances) {
-        // Only count USDC; exclude USDT for pure USDC balance
-        if (b.coin === 'USDC') {
-          spotUSDC += parseFloat(b.total) || 0;
+        if (b.coin === 'USDC' || b.token === 0) {
+          spotUSDC = Math.max(0, (parseFloat(b.total) || 0) - (parseFloat(b.hold) || 0));
+          break;
         }
       }
     }
