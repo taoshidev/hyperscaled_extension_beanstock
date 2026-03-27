@@ -268,11 +268,6 @@
         <!-- 9. Divider -->
         <span class="hf-divider"></span>
 
-        <!-- 10. HWM -->
-        <div class="hf-stat-group">
-          <span class="hf-stat-label">HWM</span>
-          <span class="hf-stat-value" id="hf-hwm">${fmt(equity)}</span>
-        </div>
 
         <!-- Disabled inline message (hidden unless .hf-disabled) -->
         <span class="hf-divider" style="display:${isDisabled ? 'block' : 'none'} !important"></span>
