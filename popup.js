@@ -64,7 +64,7 @@ async function refreshValidatorData() {
         const result = await safeSendMessage({ action: 'fetchValidatorData', address: storedAddress });
         console.log('[Hyperscaled Popup] Validator data:', JSON.stringify(result).slice(0, 1000));
 
-        if (result.status && result.status !== 'success') {
+        if (result.status !== 'success') {
             console.warn('[Hyperscaled Popup] Validator returned non-success status:', result.status);
             hideDashboard();
             return;
@@ -414,11 +414,15 @@ async function saveAddress(address) {
 function showDashboard() {
     const el = document.getElementById('dashboardContent');
     if (el) el.style.display = '';
+    const badge = document.querySelector('.status-badge');
+    if (badge) badge.style.display = '';
 }
 
 function hideDashboard() {
     const el = document.getElementById('dashboardContent');
     if (el) el.style.display = 'none';
+    const badge = document.querySelector('.status-badge');
+    if (badge) badge.style.display = 'none';
     setPlaceholders();
 }
 
