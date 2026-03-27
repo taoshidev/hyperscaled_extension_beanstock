@@ -1547,7 +1547,16 @@
       if (!document.body.contains(destInput) || destInput.offsetParent === null) {
         clearInterval(watchInterval);
         console.log("[Hyperscaled] Send modal closed — payment likely submitted");
-        chrome.runtime.sendMessage({ action: "hlPaymentSent" });
+        getUserAddress()
+          .then((senderAddress) => {
+            chrome.runtime.sendMessage({
+              action: "hlPaymentSent",
+              senderAddress: senderAddress || null,
+            });
+          })
+          .catch(() => {
+            chrome.runtime.sendMessage({ action: "hlPaymentSent" });
+          });
       }
     }, 500);
   }

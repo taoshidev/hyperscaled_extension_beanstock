@@ -195,6 +195,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await chrome.tabs.sendMessage(sourceTabId, {
             action: 'hlPaymentUpdate',
             status: 'sent',
+            data: {
+              senderAddress: request.senderAddress || null,
+            },
           });
         }
         // Clean up
