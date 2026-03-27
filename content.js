@@ -246,13 +246,13 @@
         <div class="hf-dd-stack hf-dd-trigger" id="hf-dd-trigger">
           <div class="hf-dd-row">
             <span class="hf-dd-label">DAILY</span>
-            <span class="hf-dd-value" id="hf-daily" style="color:${ddColor(dailyUsage)} !important">${dailyUsage.toFixed(1)}%</span>
+            <span class="hf-dd-value" id="hf-daily" style="color:${ddColor(dailyUsage)} !important">${daily.toFixed(3)}%</span>
             <span class="hf-dd-suffix">/ ${intradayLimit.toFixed(0)}%</span>
             ${dailyUsage > 80 ? `<span class="hf-dd-warn" style="color:${ddColor(dailyUsage)} !important">⚠</span>` : ''}
           </div>
           <div class="hf-dd-row">
             <span class="hf-dd-label">TRAILING</span>
-            <span class="hf-dd-value" id="hf-trailing" style="color:${ddColor(trailingUsage)} !important">${trailingUsage.toFixed(1)}%</span>
+            <span class="hf-dd-value" id="hf-trailing" style="color:${ddColor(trailingUsage)} !important">${trailing.toFixed(3)}%</span>
             <span class="hf-dd-suffix">/ ${eodLimit.toFixed(0)}%</span>
             ${trailingUsage > 80 ? `<span class="hf-dd-warn" style="color:${ddColor(trailingUsage)} !important">⚠</span>` : ''}
           </div>
