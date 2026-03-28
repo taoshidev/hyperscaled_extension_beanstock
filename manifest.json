@@ -26,9 +26,7 @@
     "https://api.hyperliquid.xyz/*",
     "https://app.hyperliquid-testnet.xyz/trade/*",
     "https://api.hyperliquid-testnet.xyz/*",
-    "http://34.187.154.219:48888/*",
-    "http://*/*",
-    "https://*/*"
+    "http://34.187.154.219:48888/*"
   ],
   "content_scripts": [
     {
