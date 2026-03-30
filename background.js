@@ -680,12 +680,94 @@ async function fetchValidatorData(address) {
   return result;
 }
 
+function normalizePerpSymbol(raw) {
+  if (!raw) return '';
+  return String(raw)
+    .toUpperCase()
+    .replace(/[-_]?PERP$/i, '')
+    .replace(/\/.*$/, '')
+    .replace(/USD[CT]?$/, '')
+    .trim();
+}
+
+function extractExposureFromAssetPositions(perpsData) {
+  const perAsset = {};
+  let total = 0;
+  let openCount = 0;
+  const assetPositions = Array.isArray(perpsData?.assetPositions) ? perpsData.assetPositions : [];
+
+  for (const row of assetPositions) {
+    const pos = row?.position || row || {};
+    const size = parseFloat(pos?.szi ?? pos?.size ?? pos?.sz ?? 0) || 0;
+
+    // Skip empty rows; Hyperliquid may include placeholders in some states.
+    if (Math.abs(size) <= 1e-12) continue;
+
+    const directNotional =
+      parseFloat(pos?.positionValue ?? pos?.notionalValue ?? pos?.usdValue ?? pos?.value ?? row?.positionValue);
+    const markPx = parseFloat(pos?.markPx ?? pos?.mark_price ?? pos?.px ?? 0) || 0;
+    const fallbackNotional = Math.abs(size * markPx);
+    const notional = Math.abs(Number.isFinite(directNotional) ? directNotional : fallbackNotional);
+    if (!(notional > 0)) continue;
+
+    const symbol = normalizePerpSymbol(pos?.coin ?? pos?.asset ?? pos?.name ?? row?.coin ?? row?.asset);
+    if (symbol) perAsset[symbol] = (perAsset[symbol] || 0) + notional;
+
+    total += notional;
+    openCount += 1;
+  }
+
+  const maxSingle = Object.values(perAsset).reduce((m, v) => Math.max(m, Number(v) || 0), 0);
+  return {
+    openTotalUsed: total,
+    openSingleUsed: maxSingle,
+    notionalByPair: perAsset,
+    openPositionCount: openCount,
+  };
+}
+
+function toNum(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function readSpotUsdValue(balance, mids) {
+  const coin = String(balance?.coin || '').toUpperCase();
+  const token = balance?.token;
+  const total = toNum(balance?.total);
+  const hold = toNum(balance?.hold);
+  const freeAmount = Math.max(0, total - hold);
+  if (!(freeAmount > 0)) return { usd: 0, coin, freeAmount: 0 };
+
+  // USDC is already USD-denominated.
+  if (coin === 'USDC' || token === 0 || token === '0') {
+    return { usd: freeAmount, coin: 'USDC', freeAmount };
+  }
+
+  // Prefer explicit USD fields if present in payload.
+  const explicitUsd =
+    toNum(balance?.usdValue) ||
+    toNum(balance?.notionalUsd) ||
+    toNum(balance?.valueUsd) ||
+    toNum(balance?.value_usd);
+  if (explicitUsd > 0) {
+    return { usd: explicitUsd, coin, freeAmount };
+  }
+
+  const midPx = toNum(mids?.[coin]);
+  if (midPx > 0) {
+    return { usd: freeAmount * midPx, coin, freeAmount };
+  }
+
+  return { usd: 0, coin, freeAmount };
+}
+
 // Fetch account state from Hyperliquid API (perps + spot)
 async function fetchHLBalance(address) {
   console.log('[Hyperscaled BG] fetchHLBalance called for', address);
 
   // Fetch perps and spot state in parallel
-  const [perpsRes, spotRes] = await Promise.all([
+  const [perpsRes, spotRes, midsRes] = await Promise.all([
     fetchWithTimeout(HL_API_URL + '/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -695,6 +777,11 @@ async function fetchHLBalance(address) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'spotClearinghouseState', user: address })
+    }),
+    fetchWithTimeout(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'allMids' })
     })
   ]);
 
@@ -705,25 +792,39 @@ async function fetchHLBalance(address) {
   const perpsWithdrawable = Math.max(0, perpAccountValue - perpMarginUsed);
   console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, 'perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
 
-  // Get spot USDC (total minus hold, which is committed to perp margin)
+  // Get spot asset value in USD (USDC + non-USDC assets like BTC).
   let spotUSDC = 0;
+  let spotAssetsUsd = 0;
+  let spotValueByCoin = {};
   try {
     if (spotRes.ok) {
       const spotData = await spotRes.json();
+      const mids = midsRes.ok ? await midsRes.json() : {};
       const balances = spotData?.balances || [];
       for (const b of balances) {
-        if (b.coin === 'USDC' || b.token === 0) {
-          spotUSDC = Math.max(0, (parseFloat(b.total) || 0) - (parseFloat(b.hold) || 0));
-          break;
+        const { usd, coin } = readSpotUsdValue(b, mids);
+        if (coin === 'USDC') {
+          spotUSDC += usd;
+        } else if (coin && usd > 0) {
+          spotValueByCoin[coin] = (spotValueByCoin[coin] || 0) + usd;
         }
       }
+      spotAssetsUsd = Object.values(spotValueByCoin).reduce((s, v) => s + (Number(v) || 0), 0);
     }
   } catch (e) {
     console.warn('[Hyperscaled BG] Spot fetch failed, using perps only:', e.message);
   }
-  console.log('[Hyperscaled BG] spotUSDC:', spotUSDC);
+  console.log(
+    '[Hyperscaled BG] spot valuation:',
+    JSON.stringify({
+      spotUSDC,
+      spotAssetsUsd,
+      spotTotalUsd: spotUSDC + spotAssetsUsd,
+      spotValueByCoin,
+    })
+  );
 
-  let accountValue = perpsWithdrawable + spotUSDC;
+  let accountValue = perpsWithdrawable + spotUSDC + spotAssetsUsd;
   let perpsValue = perpsWithdrawable;
 
   if (FAKE_MONEY) {
@@ -733,14 +834,31 @@ async function fetchHLBalance(address) {
   }
 
   console.log('[Hyperscaled BG] total accountValue:', accountValue);
+  const exposure = extractExposureFromAssetPositions(perpsData);
+  console.log(
+    '[Hyperscaled BG] HL exposure from assetPositions:',
+    JSON.stringify({
+      openPositionCount: exposure.openPositionCount,
+      openTotalUsed: exposure.openTotalUsed,
+      openSingleUsed: exposure.openSingleUsed,
+      notionalByPair: exposure.notionalByPair,
+    })
+  );
 
   const balanceData = {
     accountValue,
     perpAccountValue,
     perpsValue,
     spotUSDC,
+    spotAssetsUsd,
+    spotValueByCoin,
     totalMarginUsed: parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0,
     totalNtlPos: parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0,
+    openTotalUsed: exposure.openTotalUsed,
+    openSingleUsed: exposure.openSingleUsed,
+    notionalByPair: exposure.notionalByPair,
+    openPositionCount: exposure.openPositionCount,
+    exposureSource: 'hyperliquid-assetPositions',
   };
   setCachedResponse(`cache_balance_${address.toLowerCase()}`, balanceData);
   return balanceData;

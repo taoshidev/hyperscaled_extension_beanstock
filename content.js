@@ -38,6 +38,7 @@
     validatorEquity: 0,
     openSingleUsed: 0,
     openTotalUsed: 0,
+    exposureSource: "none",
     maxPositionPerPair: 0,
     maxPortfolio: 0,
     notionalByPair: {},
@@ -55,10 +56,12 @@
   const LAYOUT_STYLE_ID = "hf-layout-fix";
   const BANNER_HEIGHT = 38;
 
-  // Open exposure from the validator uses program dollars (net_leverage × funded size).
-  // Caps must use the same basis — not Hyperliquid wallet equity, which is usually smaller.
+  // Include current open notional in the sizing basis so new capacity reflects
+  // wallet funds + existing exposure.
   function marginLimitBasisUsd() {
-    return ACCOUNT.hlEquity;
+    const walletEquity = Number(ACCOUNT.hlEquity) || 0;
+    const openNotional = Number(ACCOUNT.openTotalUsed) || 0;
+    return walletEquity + openNotional;
   }
 
   function perPositionLeverageCap() {
@@ -671,8 +674,15 @@
       // Positions are already transformed: {positions: [...]}
       const positionsRaw = result.positions;
       const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
-      console.log("[Hyperscaled] Validator data loaded, account_size:", ACCOUNT.fundedSize, "positions:", positions.length);
+      console.log(
+        "[Hyperscaled] Validator data loaded, account_size:",
+        ACCOUNT.fundedSize,
+        "positions total:",
+        positions.length
+      );
+      console.log("[Hyperscaled] Validator positions payload:", positions);
       const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
+      console.log("[Hyperscaled] Validator open positions:", openPositions.length, openPositions);
       let totalUnrealizedPnl = 0;
       let totalNotional = 0;
       let maxSingleNotional = 0;
@@ -696,7 +706,13 @@
           notionalByPair[coin] = (notionalByPair[coin] || 0) + notional;
         }
       }
-      ACCOUNT.notionalByPair = notionalByPair;
+      const validatorExposure = {
+        source: "validator-net-leverage",
+        openTotalUsed: totalNotional,
+        openSingleUsed: maxSingleNotional,
+        notionalByPair,
+      };
+      console.log("[Hyperscaled] Validator exposure snapshot:", validatorExposure);
 
       ACCOUNT.isRegistered = true;
       ACCOUNT.registrationChecked = true;
@@ -719,8 +735,13 @@
       ACCOUNT.intraday_threshold_pct = parseFloat(dd.intraday_threshold_pct) || ACCOUNT.intraday_threshold_pct;
       ACCOUNT.eod_threshold_pct = parseFloat(dd.eod_threshold_pct) || ACCOUNT.eod_threshold_pct;
 
-      ACCOUNT.openTotalUsed = totalNotional;
-      ACCOUNT.openSingleUsed = maxSingleNotional;
+      // Do not let validator-funded exposure override live Hyperliquid exposure.
+      if (ACCOUNT.exposureSource !== "hyperliquid-assetPositions") {
+        ACCOUNT.notionalByPair = notionalByPair;
+        ACCOUNT.openTotalUsed = totalNotional;
+        ACCOUNT.openSingleUsed = maxSingleNotional;
+        ACCOUNT.exposureSource = "validator-net-leverage";
+      }
 
       validatorDataLoaded = true;
       updateBannerFromValidator();
@@ -791,9 +812,30 @@
       });
 
       console.log("[Hyperscaled] Balance result:", result);
-      currentBalance = result.accountValue;
+      currentBalance = Number(result.accountValue) || 0;
       ACCOUNT.hlBalance = currentBalance;
-      ACCOUNT.hlEquity = result.perpAccountValue || currentBalance;
+      // Account for spot USDC in available notional capacity calculations.
+      ACCOUNT.hlEquity = currentBalance;
+      if (result && typeof result === "object") {
+        const mappedExposure = result.notionalByPair && typeof result.notionalByPair === "object"
+          ? result.notionalByPair
+          : {};
+        const openTotalFromHL = Number(result.openTotalUsed) || 0;
+        const openSingleFromHL = Number(result.openSingleUsed) || 0;
+        ACCOUNT.notionalByPair = mappedExposure;
+        ACCOUNT.openTotalUsed = openTotalFromHL;
+        ACCOUNT.openSingleUsed = openSingleFromHL;
+        ACCOUNT.exposureSource = typeof result.exposureSource === "string" && result.exposureSource
+          ? result.exposureSource
+          : "hyperliquid-balance";
+        console.log("[Hyperscaled] Exposure basis set from HL balance:", {
+          source: ACCOUNT.exposureSource,
+          openPositionCount: Number(result.openPositionCount) || 0,
+          openTotalUsed: ACCOUNT.openTotalUsed,
+          openSingleUsed: ACCOUNT.openSingleUsed,
+          notionalByPair: ACCOUNT.notionalByPair,
+        });
+      }
       balanceVerified = true;
 
       updateBannerBalance();
@@ -849,6 +891,7 @@
       ACCOUNT.eod_usage_pct = 0;
       ACCOUNT.openSingleUsed = 0;
       ACCOUNT.openTotalUsed = 0;
+      ACCOUNT.exposureSource = "none";
       ACCOUNT.notionalByPair = {};
       ACCOUNT.inChallenge = false;
       ACCOUNT.isRegistered = false;
@@ -1759,11 +1802,17 @@
     if (typeof e.stopImmediatePropagation === "function") {
       e.stopImmediatePropagation();
     }
+    logTradeGateDiagnostics({
+      source: "interaction-blocked",
+      eventType: e?.type || null,
+      always: true,
+    });
     queueTradeBlockEnforce();
   }
 
   function forceBlockTrade(reason = "limit") {
     forcedTradeBlock = true;
+    forcedTradeBlockReason = reason;
     shouldBlockTrade = true;
     enforceTradeBlock();
     startTradeBlockObserver();
@@ -1773,6 +1822,7 @@
 
   function releaseForcedTradeBlock() {
     forcedTradeBlock = false;
+    forcedTradeBlockReason = null;
     dismissClampToast();
   }
 
@@ -1834,6 +1884,17 @@
     // forcedTradeBlock is set by explicit over-limit checks and protects against
     // cases where pending sources briefly lag HL's latest render.
     shouldBlockTrade = forcedTradeBlock || alreadyAtLimit || overSingle || overTotal || overByOrderValue;
+    logTradeGateDiagnostics({
+      source: "checkAndBlockButtons",
+      pendingNotional: pending,
+      orderValue,
+      details: {
+        alreadyAtLimit,
+        overSingle,
+        overTotal,
+        overByOrderValue,
+      },
+    });
     enforceTradeBlock();
     startTradeBlockObserver();
     installTradeGuards();
