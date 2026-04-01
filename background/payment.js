@@ -5,6 +5,10 @@ const TRUSTED_API_ORIGINS = [
   'https://www.hyperscaled.trade',
   'http://localhost:4568',
   'http://localhost:3000',
+  "https://testnet.hyperscaled.trade",
+  "https://www.testnet.hyperscaled.trade",
+  "https://staging.hyperscaled.trade",
+  "https://www.staging.hyperscaled.trade",
 ];
 
 async function notifySourceTab(tabId, status, data) {
