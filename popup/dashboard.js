@@ -13,6 +13,7 @@ export function applyValidatorData(result, state) {
     let totalUnrealizedPnl = 0;
     let totalNotional = 0;
     let maxSingleNotional = 0;
+    const validatorNotionalByPair = {};
 
     for (const pos of openPositions) {
         const notional = pos.net_leverage != null
@@ -23,6 +24,15 @@ export function applyValidatorData(result, state) {
         totalUnrealizedPnl += pnl;
         totalNotional += notional;
         if (notional > maxSingleNotional) maxSingleNotional = notional;
+
+        const tp = pos.trade_pair || '';
+        const rawSymbol = typeof tp === 'string'
+            ? tp.replace(/\/.*$/, '')
+            : (tp[0] || '');
+        const symbol = rawSymbol.replace(/USD[CT]?$/, '').toUpperCase();
+        if (symbol) {
+            validatorNotionalByPair[symbol] = (validatorNotionalByPair[symbol] || 0) + notional;
+        }
     }
 
     const cp = result.challenge_period || {};
@@ -37,6 +47,9 @@ export function applyValidatorData(result, state) {
     const drawdownPct = parseFloat(dd.intraday_drawdown_pct) || 0;
     const drawdownLimitPct = parseFloat(dd.intraday_threshold_pct) || DRAWDOWN_MAX;
     const drawdownUsagePct = parseFloat(dd.intraday_usage_pct) || 0;
+    const trailingDrawdownPct = parseFloat(dd.eod_drawdown_pct) || 0;
+    const trailingDrawdownLimitPct = parseFloat(dd.eod_threshold_pct) || DRAWDOWN_MAX;
+    const trailingDrawdownUsagePct = parseFloat(dd.eod_usage_pct) || 0;
 
     const fundedBalanceEl = document.getElementById('fundedBalance');
     if (fundedBalanceEl) fundedBalanceEl.textContent = fmtUsd(validatorEquity);
@@ -74,23 +87,41 @@ export function applyValidatorData(result, state) {
             : 'Target reached!';
     }
 
-    const drawdownValueEl = document.getElementById('drawdownValue');
-    const drawdownFillEl = document.getElementById('drawdownFill');
+    const dailyDrawdownValueEl = document.getElementById('dailyDrawdownValue');
+    const trailingDrawdownValueEl = document.getElementById('trailingDrawdownValue');
+    const dailyDrawdownFillEl = document.getElementById('dailyDrawdownFill');
+    const trailingDrawdownFillEl = document.getElementById('trailingDrawdownFill');
     const drawdownLabelEl = document.getElementById('drawdownLabel');
-    if (drawdownValueEl) drawdownValueEl.textContent = `${drawdownPct.toFixed(3)}% / ${drawdownLimitPct.toFixed(0)}%`;
-    if (drawdownFillEl) {
-        drawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
-        drawdownFillEl.style.background = drawdownUsagePct > 80 ? 'var(--red)' : drawdownUsagePct > 50 ? 'var(--amber)' : '';
+    if (dailyDrawdownValueEl) {
+        dailyDrawdownValueEl.textContent = `${drawdownPct.toFixed(3)}% / ${drawdownLimitPct.toFixed(0)}%`;
+    }
+    if (trailingDrawdownValueEl) {
+        trailingDrawdownValueEl.textContent = `${trailingDrawdownPct.toFixed(3)}% / ${trailingDrawdownLimitPct.toFixed(0)}%`;
+    }
+    if (dailyDrawdownFillEl) {
+        dailyDrawdownFillEl.style.width = Math.min(drawdownUsagePct, 100) + '%';
+        dailyDrawdownFillEl.style.background =
+            drawdownUsagePct > 80 ? 'var(--red)' : drawdownUsagePct > 50 ? 'var(--amber)' : '';
+    }
+    if (trailingDrawdownFillEl) {
+        trailingDrawdownFillEl.style.width = Math.min(trailingDrawdownUsagePct, 100) + '%';
+        trailingDrawdownFillEl.style.background =
+            trailingDrawdownUsagePct > 80 ? 'var(--red)' : trailingDrawdownUsagePct > 50 ? 'var(--amber)' : '';
     }
     if (drawdownLabelEl) {
-        const bufferPct = drawdownLimitPct - drawdownPct;
-        const bufferDollar = accountSize * (bufferPct / 100);
-        drawdownLabelEl.textContent = `${fmtUsd(Math.max(bufferDollar, 0))} remaining buffer (${bufferPct.toFixed(2)}%)`;
+        const dailyBufferPct = drawdownLimitPct - drawdownPct;
+        const dailyBufferDollar = accountSize * (dailyBufferPct / 100);
+        const trailingBufferPct = trailingDrawdownLimitPct - trailingDrawdownPct;
+        const trailingBufferDollar = accountSize * (trailingBufferPct / 100);
+        drawdownLabelEl.textContent =
+            `Daily ${fmtUsd(Math.max(dailyBufferDollar, 0))} (${dailyBufferPct.toFixed(2)}%) · ` +
+            `Trailing ${fmtUsd(Math.max(trailingBufferDollar, 0))} (${trailingBufferPct.toFixed(2)}%) buffer`;
     }
 
     const perPairLevCap = inChallenge ? 0.625 : 2.5;
     const totalLevCap   = inChallenge ? 1.25  : 5;
-    const basisUsd = state.hlBalance;
+    // Match content-script enforcement basis: live equity + deployed open exposure.
+    const basisUsd = (Number(state.hlBalance) || 0) + (Number(state.openTotalUsed) || 0);
 
     let maxPerPair = basisUsd * perPairLevCap;
     let maxTotal   = basisUsd * totalLevCap;
@@ -102,30 +133,63 @@ export function applyValidatorData(result, state) {
         if (backendTotal > 0) maxTotal = Math.min(maxTotal, backendTotal);
     }
 
-    const largestPairNotional = maxSingleNotional;
-    const perPairUsedEl = document.getElementById('perPairUsed');
-    const perPairMaxEl = document.getElementById('perPairMax');
-    const perPairFillEl = document.getElementById('perPairFill');
+    const hasHlExposureData = (
+        (Number(state.openTotalUsed) || 0) > 0 ||
+        (Number(state.openSingleUsed) || 0) > 0 ||
+        (state.notionalByPair && Object.keys(state.notionalByPair).length > 0)
+    );
+    const largestPairNotional = hasHlExposureData ? (Number(state.openSingleUsed) || 0) : maxSingleNotional;
+    const totalCapacityUsed = hasHlExposureData ? (Number(state.openTotalUsed) || 0) : totalNotional;
     const perPairRemainingEl = document.getElementById('perPairRemaining');
-    if (perPairUsedEl) perPairUsedEl.textContent = fmtUsd(largestPairNotional);
-    if (perPairMaxEl) perPairMaxEl.textContent = fmtUsd(maxPerPair);
-    if (perPairFillEl) {
-        const ppPct = maxPerPair > 0 ? Math.min((largestPairNotional / maxPerPair) * 100, 100) : 0;
-        perPairFillEl.style.width = ppPct + '%';
-    }
+    const perPairSubBarsEl = document.getElementById('perPairSubBars');
+    const perAssetSource = hasHlExposureData ? state.notionalByPair : validatorNotionalByPair;
+    const perAssetEntries = Object.entries(perAssetSource || {})
+        .map(([symbol, value]) => [String(symbol).toUpperCase(), Number(value) || 0])
+        .filter(([, value]) => value > 0)
+        .sort((a, b) => b[1] - a[1]);
     if (perPairRemainingEl) perPairRemainingEl.textContent = fmtUsd(Math.max(maxPerPair - largestPairNotional, 0));
+    if (perPairSubBarsEl) {
+        if (perAssetEntries.length === 0) {
+            perPairSubBarsEl.innerHTML = '';
+        } else {
+            perPairSubBarsEl.innerHTML = perAssetEntries.map(([symbol, value]) => {
+                const usedPct = maxPerPair > 0 ? Math.min((value / maxPerPair) * 100, 100) : 0;
+                const safeSymbol = symbol.replace(/[^A-Z0-9._-]/g, '');
+                return `
+                    <div class="capacity-asset-row">
+                        <span class="capacity-asset-symbol">${safeSymbol}</span>
+                        <div class="capacity-asset-track">
+                            <div class="capacity-asset-fill" style="width: ${usedPct.toFixed(1)}%;"></div>
+                        </div>
+                        <span class="capacity-asset-value">${fmtUsd(value)} / ${fmtUsd(maxPerPair)}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+    const perPairBreakdownEl = document.getElementById('perPairBreakdown');
+    if (perPairBreakdownEl) {
+        if (perAssetEntries.length === 0) {
+            perPairBreakdownEl.textContent = 'No open positions';
+            perPairBreakdownEl.removeAttribute('title');
+        } else {
+            const fullText = perAssetEntries.map(([symbol, value]) => `${symbol} ${fmtUsd(value)}`).join(' · ');
+            perPairBreakdownEl.textContent = `${perAssetEntries.length} asset${perAssetEntries.length > 1 ? 's' : ''} with open exposure`;
+            perPairBreakdownEl.title = fullText;
+        }
+    }
 
     const capacityUsedEl = document.getElementById('capacityUsed');
     const capacityMaxEl = document.getElementById('capacityMax');
     const capacityFillEl = document.getElementById('capacityFill');
     const capacityRemainingEl = document.getElementById('capacityRemaining');
-    if (capacityUsedEl) capacityUsedEl.textContent = fmtUsd(totalNotional);
+    if (capacityUsedEl) capacityUsedEl.textContent = fmtUsd(totalCapacityUsed);
     if (capacityMaxEl) capacityMaxEl.textContent = fmtUsd(maxTotal);
     if (capacityFillEl) {
-        const capPct = maxTotal > 0 ? Math.min((totalNotional / maxTotal) * 100, 100) : 0;
+        const capPct = maxTotal > 0 ? Math.min((totalCapacityUsed / maxTotal) * 100, 100) : 0;
         capacityFillEl.style.width = capPct + '%';
     }
-    if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalNotional, 0));
+    if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalCapacityUsed, 0));
 
     renderPositions(openPositions, accountSize);
     showDashboard();

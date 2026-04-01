@@ -125,6 +125,7 @@ Indigo (`#6466f1`) is used exclusively for the Trading Capacity bar — a neutra
 | `--indigo-bg` | `rgba(100, 102, 241, 0.1)` | Capacity bar track background |
 
 **Rule:** Do not use `--indigo` for any semantic purpose (it has no directional meaning). It is a visual separator from teal and amber — one color per indicator type.
+For Trading Capacity "Per Asset", use indigo for both the main utilization bar and asset-level sub-bars only; vary depth with opacity (track at 10-16% tint), not hue changes.
 
 ---
 
@@ -180,10 +181,12 @@ Fixed-position toasts injected on the Hyperliquid trading page (`content.css` �
 | Payout value (claimable hero) | Menlo | 28px | 800 | tracking -0.56px, tabular-nums, `--accent` |
 | Balance change / P&L delta | UI | 11px | 400 | `--green` or `--red` |
 | Section titles (Challenge Progress, Drawdown, Capacity) | UI | 12px | 600 | `--text-strong` |
-| Section values (percentages, gauge readings) | Menlo | 12px | 700 | tabular-nums; challenge = `--accent`, drawdown = `--amber` |
+| Section values (percentages, gauge readings) | Menlo | 12px | 700 | tabular-nums; challenge header = `--accent`; drawdown uses `--amber` on Daily/Trailing row values only |
+| Drawdown row values (Daily / Trailing) | Menlo | 11px | 400 | tabular-nums; `--amber`, paired with row labels in UI font |
 | Balance card label | UI | 10px | 400 | `--text-label`, uppercase, letter-spacing 0.08em |
 | Body / misc | UI | 14px | 400 | |
 | Capacity footer values | UI | 11px | 400 | `--text-faint` |
+| Capacity asset mini-bars | Menlo | 10px | 600 (symbol) / 400 (value) | symbol `--text-secondary`, value `--text-faint`; value text is right-aligned tabular `used / max` |
 | Position PnL | UI | 12px | 600 | `--green` / `--red` |
 | Trading symbols | Menlo | 12px | 600 | |
 | Trading data | Menlo | 10px | 400–600 | |
@@ -273,7 +276,6 @@ The popup has three mutually exclusive screen states, toggled via `style.display
 | **Not Registered** | No wallet address saved | Header + `#walletConfig` (not-registered screen) + Footer | Pending, all active-trading sections, Positions, Payouts, Settings |
 | **Pending** | Address saved, no active challenge | Header + `#pendingScreen` + Footer | walletConfig, all active-trading sections, Positions, Payouts, Settings |
 | **Active** | Address saved, active challenge found | Header + walletCollapsed + balance/capacity/challenge/drawdown/positions/events + Footer | walletConfig, pendingScreen, Positions, Payouts, Settings |
-| **Positions** | "View all →" tapped from Active | Header + `#positionsScreen` + Footer | All active-trading sections |
 | **Payouts** | Payout card tapped from Active | Header + `#payoutsScreen` + Footer | All active-trading sections |
 | **Settings** | Settings entry point tapped | Header + `#settingsScreen` + Footer | All active-trading sections |
 
@@ -281,7 +283,7 @@ The popup has three mutually exclusive screen states, toggled via `style.display
 
 ### Progress bar height
 
-All progress bars use a uniform `10px` height for visual consistency. No height-based hierarchy — bar purpose is distinguished by color alone (teal = challenge, amber = drawdown/pending, indigo = capacity).
+All progress bars use a uniform `10px` height for visual consistency. No height-based hierarchy — bar purpose is distinguished by color alone (teal = challenge, amber = drawdown/pending, indigo = capacity). Current Drawdown is represented as two stacked amber bars (Daily and Trailing), each still `10px`.
 
 ---
 
@@ -365,6 +367,22 @@ Inline expandable explanations that educate users about trading concepts and met
 **Rule:** Explanations are educational only — they should describe what a metric means and how it affects the user. Never use info-expand for error messages or warnings.
 
 **Rule:** Keep explanation text concise (2–3 sentences max). Traders glance, they don't read paragraphs.
+
+---
+
+## Order events list (pagination)
+
+The dashboard **Order Events** section shows validator order activity. When there are more events than fit a single view, pagination keeps the popup scannable.
+
+| Element | Treatment |
+|---------|-----------|
+| Page size | `8` events per page (`EVENTS_PER_PAGE` in `popup/events.js`) |
+| Controls | Prev / next ghost-style icon buttons (`.events-page-btn`), same hover pattern as other ghost controls: `border-color: var(--accent-border)`, `color: var(--accent)` when enabled |
+| Range label | Centered `11px`, `var(--text-faint)`, tabular nums — e.g. `1–8 of 24` |
+| Container | `.events-pagination`: top border `var(--border-card)`, `margin-top` / `padding-top` `--space-2`, horizontal flex with `--space-3` gap |
+| Visibility | Pagination row is `hidden` when total events ≤ page size, or when there is no list (wallet missing, error, empty) |
+
+**Rule:** Header badge (`.events-count`) continues to show the **total** filtered event count, not the current page only.
 
 ---
 

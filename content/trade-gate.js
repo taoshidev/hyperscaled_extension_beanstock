@@ -11,6 +11,9 @@
   let isEnforcingBlock = false;
   let tradeGuardsInstalled = false;
   let tradeGuardAbort = null;
+  let lastDepositWarningAt = 0;
+  let depositBypassUntil = 0;
+  let lastBlockedDepositButton = null;
 
   const TRADE_GATE_DEBUG = (() => {
     try {
@@ -36,6 +39,59 @@
 
   function normalizeTradeText(text) {
     return (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function hasOpenPositions() {
+    if (Number(ACCOUNT.openTotalUsed) > 0.01) return true;
+    const byPair = ACCOUNT.notionalByPair || {};
+    return Object.values(byPair).some((value) => Number(value) > 0.01);
+  }
+
+  function getDepositButtonTarget(target) {
+    const button = target?.closest?.('button, [role="button"]');
+    if (!button) return null;
+    if (button.closest("#hf-banner") || button.closest("#hf-toast-container")) return null;
+
+    const text = normalizeTradeText(button.textContent);
+    const title = normalizeTradeText(button.getAttribute("title"));
+    const aria = normalizeTradeText(button.getAttribute("aria-label"));
+    const combined = [text, title, aria].filter(Boolean).join(" ");
+    if (!combined) return null;
+    return /\bdeposit\b/.test(combined) ? button : null;
+  }
+
+  function isDepositButtonTarget(target) {
+    return !!getDepositButtonTarget(target);
+  }
+
+  function bypassDepositBlockAndRetry() {
+    depositBypassUntil = Date.now() + 2000;
+    const targetBtn = lastBlockedDepositButton;
+    if (!targetBtn || !targetBtn.isConnected) return false;
+    targetBtn.click();
+    return true;
+  }
+
+  function maybeBlockDepositWhileOwningAssets(e, submitter) {
+    if (!HF.state.balanceVerified || !HF.state.validatorDataLoaded) return;
+    const targetForCheck = submitter || e?.target;
+    const depositBtn = getDepositButtonTarget(targetForCheck);
+    if (!depositBtn) return;
+    if (Date.now() < depositBypassUntil) return;
+    if (!hasOpenPositions()) return;
+    lastBlockedDepositButton = depositBtn;
+
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") {
+      e.stopImmediatePropagation();
+    }
+
+    const now = Date.now();
+    if (now - lastDepositWarningAt < 800) return;
+    lastDepositWarningAt = now;
+
+    HF.toast.showDepositScalingToast();
   }
 
   function isTradeButton(btn) {
@@ -254,9 +310,11 @@
 
     const opts = { capture: true, passive: false, signal: tradeGuardAbort.signal };
     const clickLikeHandler = (e) => {
+      maybeBlockDepositWhileOwningAssets(e, null);
       if (shouldBlockTradeInteraction(e.target, null)) cancelBlockedTrade(e);
     };
     const submitHandler = (e) => {
+      maybeBlockDepositWhileOwningAssets(e, e.submitter || null);
       if (shouldBlockTradeInteraction(e.target, e.submitter || null)) cancelBlockedTrade(e);
     };
     const enterHandler = (e) => {
@@ -323,5 +381,6 @@
     uninstallTradeGuards,
     startTradeBlockObserver,
     stopTradeBlockObserver,
+    bypassDepositBlockAndRetry,
   };
 })();

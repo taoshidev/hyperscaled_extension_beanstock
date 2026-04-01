@@ -4,8 +4,22 @@
   const { ACCOUNT } = HF.state;
 
   let activeClampToast = null;
+  let activeInfoToast = null;
+  let infoToastTimer = null;
   let blockedToastDismissed = false;
   let blockedToastDetailsExpanded = false;
+  let depositToastDetailsExpanded = false;
+
+  function ensureToastContainer() {
+    let container = document.getElementById("hf-toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "hf-toast-container";
+      container.className = "hf-toast-container";
+      (document.body || document.documentElement).appendChild(container);
+    }
+    return container;
+  }
 
   function formatLeverageForToast(value) {
     if (!Number.isFinite(value) || value <= 0) return "0x";
@@ -38,7 +52,7 @@
   }
 
   function showClampToast(details) {
-    const { fmt, effectiveMaxSingleUsd, formatSizeForToast, getSizeUnit, getCurrentSymbol, marginLimitBasisUsd } = HF.utils;
+    const { fmt, effectiveMaxSingleUsd, formatSizeForToast, getSizeUnit, getCurrentSymbol, marginLimitBasisUsd, getActiveOrderSide } = HF.utils;
     const requested = Number(details?.requestedNotional) || 0;
     const allowed = Number(details?.allowedNotional) || 0;
     const constraint = details?.constraint || "portfolio";
@@ -62,6 +76,12 @@
       maxLeverage: formatLeverageForToast(maxPairLeverage),
       remainingLeverage: formatLeverageForToast(remainingPairLeverage),
     };
+    const activeOrderSide = typeof getActiveOrderSide === "function" ? getActiveOrderSide() : null;
+    const isBuySide = activeOrderSide === "buy";
+    const hasSameAssetExposure = usedPerPairUsd > 0.01;
+    const perAssetBuyContext = constraint === "per-pair" && isBuySide && hasSameAssetExposure;
+    const isCrossPairContext = constraint === "portfolio";
+    const crossPairSuggestions = "To free cross-pair capacity, reduce some other pairs first: trim your largest position, close lower-conviction pairs, or stagger new entries instead of opening multiple pairs at once.";
 
     if (isBlockedOnly && blockedToastDismissed) return;
     if (!isBlockedOnly) blockedToastDetailsExpanded = false;
@@ -75,22 +95,39 @@
        titleHtml = "Hyperscaled: Order Prevented";
        messageHtml =
          "No remaining capacity within your <b>" + constraint + "</b> position limit.";
+       if (perAssetBuyContext) {
+         messageHtml += " You already have <b>" + pairContext.usedUsd + "</b> on " + symbolLabel + ", so this asset's remaining buy capacity is currently exhausted.";
+       } else if (isCrossPairContext) {
+         messageHtml += " " + crossPairSuggestions;
+       }
        iconHtml = "\u26d4";
        variantClass = "hf-toast hf-toast--warning";
     } else if (isBlockedOnly) {
        titleHtml = "Order Blocked";
-       messageHtml = "Requested size is above your active " + constraint + " limit. " +
-         "Per-pair remaining: <b>" + pairContext.remainingUsd + "</b> (" + pairContext.remainingLeverage + " available).";
+       messageHtml = "Requested size is above your active " + constraint + " limit.";
+       if (perAssetBuyContext) {
+         messageHtml += " You already hold <b>" + pairContext.usedUsd + "</b> on " + symbolLabel +
+           ", so there is less room left for additional buys on this asset.";
+       } else if (isCrossPairContext) {
+         messageHtml += " " + crossPairSuggestions;
+       } else {
+         messageHtml += " Per-pair remaining: <b>" + pairContext.remainingUsd + "</b> (" + pairContext.remainingLeverage + " available).";
+       }
        iconHtml = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#f87171" stroke-width="1.5"/><line x1="5" y1="5" x2="11" y2="11" stroke="#f87171" stroke-width="1.5" stroke-linecap="round"/></svg>';
        variantClass = "hf-toast hf-toast--blocked";
     } else if (constraint === 'per-pair') {
        messageHtml = "Single-asset limit is <b>" + fmt(effectiveMaxSingleUsd()) + "</b>. Size " +
          formatSizeForToast(requestedSize, sizeUnit) + " " + sizeUnit + " should be reduced to " +
          formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + ".";
+       if (perAssetBuyContext) {
+         messageHtml += " You already have <b>" + pairContext.usedUsd + "</b> on " + symbolLabel +
+           ", so your additional buy room on this asset is smaller right now.";
+       }
     } else {
        messageHtml = "Portfolio capacity allows <b>" + fmt(allowed) + "</b>. Size " +
          formatSizeForToast(requestedSize, sizeUnit) + " " + sizeUnit + " should be reduced to " +
          formatSizeForToast(clampedSize, sizeUnit) + " " + sizeUnit + ".";
+       messageHtml += " " + crossPairSuggestions;
     }
 
     const showClose = isBlockedOnly;
@@ -132,13 +169,7 @@
       return;
     }
 
-    let container = document.getElementById("hf-toast-container");
-    if (!container) {
-      container = document.createElement("div");
-      container.id = "hf-toast-container";
-      container.className = "hf-toast-container";
-      (document.body || document.documentElement).appendChild(container);
-    }
+    const container = ensureToastContainer();
 
     const toast = document.createElement("div");
     toast.className = variantClass;
@@ -185,6 +216,119 @@
     toast.classList.add("hf-toast-show");
   }
 
+  function showDepositScalingToast() {
+    const titleHtml = "Deposit Blocked";
+    const messageHtml = "You can't deposit while owning assets unless you explicitly bypass this warning.";
+    const iconHtml = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#f87171" stroke-width="1.5"/><line x1="5" y1="5" x2="11" y2="11" stroke="#f87171" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    const variantClass = "hf-toast hf-toast--blocked";
+    const detailsId = "hf-toast-deposit-details";
+    const detailsToggleHtml =
+      '<button class="hf-toast-details-toggle" type="button" aria-expanded="' + (depositToastDetailsExpanded ? "true" : "false") + '" aria-controls="' + detailsId + '">' +
+        '<span>Why blocked?</span>' +
+        '<svg class="hf-toast-details-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">' +
+          '<path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg>" +
+      "</button>";
+    const detailsPanelHtml =
+      '<div id="' + detailsId + '" class="hf-toast-details' + (depositToastDetailsExpanded ? " hf-toast-details-open" : "") + '" ' + (depositToastDetailsExpanded ? "" : "hidden") + ">" +
+        '<div class="hf-toast-details-head">Why this matters</div>' +
+        '<ul class="hf-toast-details-list">' +
+          '<li><span>Scaling impact:</span> Depositing while you already own assets changes account equity immediately, which shifts remaining-size calculations for new orders.</li>' +
+          '<li><span>Risk impact:</span> Your open positions were sized on pre-deposit equity, so position scaling logic can be temporarily inconsistent until account state is re-evaluated.</li>' +
+          '<li><span>Safe path:</span> Close positions first, deposit, then re-open with fresh sizing.</li>' +
+        "</ul>" +
+      "</div>";
+    const bypassActionHtml =
+      '<button class="hf-toast-details-toggle hf-toast-deposit-bypass" type="button" aria-label="Bypass deposit warning">' +
+        "<span>I understand - let me deposit</span>" +
+      "</button>";
+    const innerHtml =
+      '<div class="hf-toast-icon">' + iconHtml + '</div>' +
+      '<div class="hf-toast-content">' +
+        '<div class="hf-toast-title">' + titleHtml + '</div>' +
+        '<div class="hf-toast-msg">' + messageHtml + '</div>' +
+        detailsToggleHtml +
+        detailsPanelHtml +
+        bypassActionHtml +
+      '</div>' +
+      '<button class="hf-toast-close" type="button" aria-label="Dismiss">' +
+        '<svg width="10" height="10" viewBox="0 0 10 10" fill="none">' +
+          '<line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+          '<line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+        "</svg>" +
+      "</button>";
+
+    const container = ensureToastContainer();
+    depositToastDetailsExpanded = false;
+    if (activeInfoToast && activeInfoToast.parentNode) {
+      activeInfoToast.className = variantClass + " hf-toast-show";
+      activeInfoToast.innerHTML = innerHtml;
+    } else {
+      const toast = document.createElement("div");
+      toast.className = variantClass;
+      toast.innerHTML = innerHtml;
+      container.appendChild(toast);
+      activeInfoToast = toast;
+      void toast.offsetWidth;
+      toast.classList.add("hf-toast-show");
+    }
+
+    const toast = activeInfoToast;
+    if (toast && !toast.dataset.depositHandlersBound) {
+      toast.dataset.depositHandlersBound = "1";
+      toast.addEventListener("mousedown", function(e) {
+        const bypassBtn = e.target.closest(".hf-toast-deposit-bypass");
+        if (bypassBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          HF.tradeGate?.bypassDepositBlockAndRetry?.();
+          dismissInfoToast();
+          return;
+        }
+
+        const detailsToggle = e.target.closest(".hf-toast-details-toggle");
+        if (detailsToggle && !detailsToggle.classList.contains("hf-toast-deposit-bypass")) {
+          e.preventDefault();
+          e.stopPropagation();
+          depositToastDetailsExpanded = !depositToastDetailsExpanded;
+          const detailsPanel = toast.querySelector(".hf-toast-details");
+          if (detailsPanel) {
+            detailsPanel.hidden = !depositToastDetailsExpanded;
+            detailsPanel.classList.toggle("hf-toast-details-open", depositToastDetailsExpanded);
+          }
+          detailsToggle.setAttribute("aria-expanded", depositToastDetailsExpanded ? "true" : "false");
+          return;
+        }
+
+        if (e.target.closest(".hf-toast-close")) {
+          e.preventDefault();
+          e.stopPropagation();
+          dismissInfoToast();
+        }
+      });
+    }
+
+    if (infoToastTimer) clearTimeout(infoToastTimer);
+    infoToastTimer = setTimeout(() => {
+      dismissInfoToast();
+    }, 8000);
+  }
+
+  function dismissInfoToast() {
+    if (infoToastTimer) {
+      clearTimeout(infoToastTimer);
+      infoToastTimer = null;
+    }
+    if (!activeInfoToast) return;
+    const toast = activeInfoToast;
+    activeInfoToast = null;
+    depositToastDetailsExpanded = false;
+    toast.classList.remove("hf-toast-show");
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  }
+
   function dismissClampToast() {
     if (!activeClampToast) return;
     const toast = activeClampToast;
@@ -206,6 +350,7 @@
 
   HF.toast = {
     showClampToast,
+    showDepositScalingToast,
     dismissClampToast,
     resetBlockedToastDismissed,
     isBlockedToastDismissed,

@@ -228,11 +228,13 @@
 
   function clampInputIfNeeded(input) {
     const { parseNumber, readOrderValueFromDOM, inputToNotional, getCurrentSymbol,
-            effectiveMaxSingleUsd, effectiveMaxTotalUsd, getSizeUnit, fmt } = HF.utils;
+            effectiveMaxSingleUsd, effectiveMaxTotalUsd, getSizeUnit, fmt,
+            isLikelySizeInput } = HF.utils;
 
     if (!HF.state.balanceVerified) return;
     if (!HF.state.validatorDataLoaded) return;
     if (isClampingInProgress) return;
+    if (input && !isLikelySizeInput(input)) return;
     input = resolveLiveSizeInput(input);
     if (!input) return;
 

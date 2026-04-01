@@ -131,11 +131,25 @@
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Current Drawdown <button class="info-toggle" aria-expanded="false" data-info="currentDrawdown"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4M8 5.5v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
-                <div class="section-value drawdown"><span id="drawdownValue">--</span></div>
             </div>
-            <div class="info-expand" id="info-currentDrawdown" hidden>Drawdown measures how much your account has dropped from its starting equity during the day. If your intraday drawdown exceeds the limit (typically 5%), your challenge is breached. The bar shows how much of your allowed drawdown you've used — amber means caution, red means danger. Keep this as low as possible.</div>
-            <div class="progress-bar drawdown-bar">
-                <div class="progress-fill drawdown-fill" id="drawdownFill" style="width: 0%;"></div>
+            <div class="info-expand" id="info-currentDrawdown" hidden>Drawdown tracks both your daily (intraday) and trailing (end-of-day) loss against their limits. If either one exceeds its threshold, your challenge is breached. Daily and trailing are shown as separate bars, each with its own usage level — amber means caution, red means danger. Keep both as low as possible.</div>
+            <div class="drawdown-row">
+                <div class="drawdown-row-header">
+                    <span class="drawdown-row-label">Daily</span>
+                    <span class="drawdown-row-value" id="dailyDrawdownValue">--</span>
+                </div>
+                <div class="progress-bar drawdown-bar">
+                    <div class="progress-fill drawdown-fill" id="dailyDrawdownFill" style="width: 0%;"></div>
+                </div>
+            </div>
+            <div class="drawdown-row">
+                <div class="drawdown-row-header">
+                    <span class="drawdown-row-label">Trailing</span>
+                    <span class="drawdown-row-value" id="trailingDrawdownValue">--</span>
+                </div>
+                <div class="progress-bar drawdown-bar">
+                    <div class="progress-fill drawdown-fill" id="trailingDrawdownFill" style="width: 0%;"></div>
+                </div>
             </div>
             <div class="progress-label"><span id="drawdownLabel">--</span></div>
         </div>
@@ -154,13 +168,10 @@
             <div class="capacity-row">
                 <div class="capacity-row-header">
                     <span class="capacity-row-label">Per Asset</span>
-                    <span class="capacity-row-value"><span id="perPairUsed">--</span> / <span id="perPairMax">--</span></span>
                 </div>
-                <div class="capacity-bar">
-                    <div class="capacity-fill capacity-fill--pair" id="perPairFill" style="width: 0%;"></div>
-                </div>
+                <div class="capacity-asset-list" id="perPairSubBars"></div>
                 <div class="capacity-footer">
-                    <span class="capacity-used">Largest position</span>
+                    <span class="capacity-used" id="perPairBreakdown">No open positions</span>
                     <span class="capacity-remaining"><span id="perPairRemaining">--</span> left</span>
                 </div>
             </div>
@@ -185,7 +196,6 @@
         <div class="section">
             <div class="section-header section-header--positions">
                 <div class="section-title section-title--uppercase">Open Positions <button class="info-toggle" aria-expanded="false" data-info="openPositions"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4M8 5.5v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
-                <a href="#" class="view-link">View all →</a>
             </div>
             <div class="info-expand" id="info-openPositions" hidden>Your currently open trades as reported by the Vanta Network validator, mirrored from your Hyperliquid account. P&L shown is unrealized (the position hasn't been closed yet). Value is the notional size of the position. Entry is the average price you entered at.</div>
             <div id="positionsContainer">
@@ -214,6 +224,11 @@
             <div class="info-expand" id="info-orderEvents" hidden>Recent order activity on your account. Green-bordered events were accepted and filled. Red-bordered events were rejected — typically due to exceeding capacity limits, trading unsupported pairs, or other risk constraints enforced by the validator.</div>
             <div id="eventsContainer">
                 <div class="no-more-positions">Loading events...</div>
+            </div>
+            <div class="events-pagination" id="eventsPagination" hidden>
+                <button type="button" id="eventsPagePrev" class="events-page-btn" disabled aria-label="Previous page">‹</button>
+                <span class="events-page-label" id="eventsPageLabel" aria-live="polite"></span>
+                <button type="button" id="eventsPageNext" class="events-page-btn" disabled aria-label="Next page">›</button>
             </div>
         </div>
 

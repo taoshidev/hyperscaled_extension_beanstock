@@ -186,6 +186,169 @@
     return false;
   }
 
+  function normalizeText(value) {
+    return (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function parseCssColor(color) {
+    if (!color || typeof color !== "string") return null;
+    const m = color.match(/rgba?\(([^)]+)\)/i);
+    if (!m) return null;
+    const parts = m[1].split(",").map((p) => p.trim());
+    if (parts.length < 3) return null;
+    const r = Number(parts[0]);
+    const g = Number(parts[1]);
+    const b = Number(parts[2]);
+    const a = parts.length >= 4 ? Number(parts[3]) : 1;
+    if (![r, g, b, a].every(Number.isFinite)) return null;
+    return { r, g, b, a };
+  }
+
+  function getColorSaturation(color) {
+    if (!color) return 0;
+    const max = Math.max(color.r, color.g, color.b);
+    const min = Math.min(color.r, color.g, color.b);
+    if (max <= 0) return 0;
+    return (max - min) / max;
+  }
+
+  function getButtonActivationScore(button) {
+    if (!(button instanceof HTMLButtonElement)) return -Infinity;
+    if (button.offsetParent === null) return -Infinity;
+
+    let score = 0;
+    const ariaPressed = button.getAttribute("aria-pressed");
+    const ariaSelected = button.getAttribute("aria-selected");
+    const ariaChecked = button.getAttribute("aria-checked");
+    const className = (button.className || "").toLowerCase();
+    const dataState = normalizeText(button.getAttribute("data-state"));
+
+    if (ariaPressed === "true" || ariaSelected === "true" || ariaChecked === "true") score += 100;
+    if (ariaPressed === "false" || ariaSelected === "false" || ariaChecked === "false") score -= 100;
+    if (/\b(active|selected|checked|current)\b/.test(className)) score += 40;
+    if (dataState === "active" || dataState === "on" || dataState === "selected") score += 40;
+
+    const styles = window.getComputedStyle(button);
+    const bg = parseCssColor(styles.backgroundColor);
+    const border = parseCssColor(styles.borderColor);
+    if (bg && bg.a > 0.2) {
+      score += 10;
+      score += getColorSaturation(bg) * 30;
+    }
+    if (border && border.a > 0.2) {
+      score += getColorSaturation(border) * 10;
+    }
+    return score;
+  }
+
+  function getActiveOrderSideFromHlToggle(scope) {
+    if (!(scope instanceof Element || scope === document.body)) return null;
+
+    const labels = Array.from(scope.querySelectorAll("div")).filter((el) => {
+      const text = normalizeText(el.textContent);
+      return text === "buy / long" || text === "sell / short";
+    });
+    if (!labels.length) return null;
+
+    for (const label of labels) {
+      const toggleRoot = label.parentElement;
+      if (!toggleRoot) continue;
+      const toggleText = normalizeText(toggleRoot.textContent);
+      if (!toggleText.includes("buy / long") || !toggleText.includes("sell / short")) continue;
+
+      const marker = toggleRoot.querySelector("div.left, div.right");
+      if (marker) {
+        if (marker.classList.contains("left")) return "buy";
+        if (marker.classList.contains("right")) return "sell";
+      }
+
+      const markerParent = marker?.parentElement;
+      if (markerParent) {
+        if (markerParent.classList.contains("left")) return "buy";
+        if (markerParent.classList.contains("right")) return "sell";
+      }
+
+      if (toggleRoot.classList.contains("left")) return "buy";
+      if (toggleRoot.classList.contains("right")) return "sell";
+      if (toggleRoot.parentElement?.classList.contains("left")) return "buy";
+      if (toggleRoot.parentElement?.classList.contains("right")) return "sell";
+    }
+
+    return null;
+  }
+
+  function buildOrderSideCandidates(preferredInput) {
+    const candidates = [];
+    const seen = new Set();
+
+    if (preferredInput instanceof HTMLInputElement) {
+      let current = preferredInput.closest("form") || preferredInput.parentElement;
+      let hops = 0;
+      while (current && current !== document.body && hops < 10) {
+        if (!seen.has(current)) {
+          candidates.push(current);
+          seen.add(current);
+        }
+        current = current.parentElement;
+        hops += 1;
+      }
+    }
+    if (!seen.has(document.body)) candidates.push(document.body);
+    return candidates;
+  }
+
+  function getBestSideButtonsInScope(scope) {
+    const buttons = scope.querySelectorAll("button");
+    let bestBuy = null;
+    let bestBuyScore = -Infinity;
+    let bestSell = null;
+    let bestSellScore = -Infinity;
+
+    for (const button of buttons) {
+      if (button.closest("#" + HF.state.BANNER_ID)) continue;
+      const text = normalizeText(button.textContent);
+      const aria = normalizeText(button.getAttribute("aria-label"));
+      const combined = (text + " " + aria).trim();
+      if (!combined) continue;
+
+      const score = getButtonActivationScore(button);
+      if (combined.includes("buy") || combined.includes("long")) {
+        if (score > bestBuyScore) {
+          bestBuy = button;
+          bestBuyScore = score;
+        }
+      }
+      if (combined.includes("sell") || combined.includes("short")) {
+        if (score > bestSellScore) {
+          bestSell = button;
+          bestSellScore = score;
+        }
+      }
+    }
+    return { bestBuy, bestBuyScore, bestSell, bestSellScore };
+  }
+
+  function getActiveOrderSide(preferredInput) {
+    const scopes = buildOrderSideCandidates(preferredInput);
+    for (const scope of scopes) {
+      const hlToggleSide = getActiveOrderSideFromHlToggle(scope);
+      if (hlToggleSide) return hlToggleSide;
+
+      const { bestBuy, bestBuyScore, bestSell, bestSellScore } = getBestSideButtonsInScope(scope);
+      if (!bestBuy && !bestSell) continue;
+      if (bestBuy && !bestSell) return "buy";
+      if (!bestBuy && bestSell) return "sell";
+      if (Math.abs(bestBuyScore - bestSellScore) < 5) continue;
+      return bestBuyScore > bestSellScore ? "buy" : "sell";
+    }
+    return null;
+  }
+
+  function isBuyOrderSideActive(preferredInput) {
+    const side = getActiveOrderSide(preferredInput);
+    return side === "buy";
+  }
+
   function isLiveEditableInput(input) {
     return (
       input instanceof HTMLInputElement &&
@@ -267,6 +430,8 @@
     readOrderValueFromDOM,
     isSizeInput,
     isLikelySizeInput,
+    getActiveOrderSide,
+    isBuyOrderSideActive,
     isLiveEditableInput,
     CLAMP_DEBUG,
     clampDebug,

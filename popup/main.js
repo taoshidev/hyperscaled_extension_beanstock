@@ -1,8 +1,8 @@
 // Popup entry point
 import { fmtUsd, truncateAddress } from './format.js';
-import { safeSendMessage, getCachedData, loadAddress, saveAddress, getHlAppUrl } from './api.js';
+import { safeSendMessage, getCachedData, loadAddress, saveAddress } from './api.js';
 import { applyValidatorData, renderPositions } from './dashboard.js';
-import { refreshEvents, renderEvents } from './events.js';
+import { refreshEvents, renderEvents, initEventsPagination } from './events.js';
 import { showDashboard, hideDashboard, showUnregistered, hideUnregistered, setPlaceholders } from './screens.js';
 import { showPositionNotification, setupNotificationClickHandler } from './notifications.js';
 import { initExplainers } from './explain.js';
@@ -12,6 +12,9 @@ const state = {
     storedAddress: null,
     traderLimits: null,
     hlBalance: 0,
+    openTotalUsed: 0,
+    openSingleUsed: 0,
+    notionalByPair: {},
     refreshIntervalId: null,
     dashboardShown: false,
 };
@@ -30,7 +33,12 @@ async function restoreFromCache() {
     ]);
 
     if (balanceCache?.data) {
-        state.hlBalance = balanceCache.data.perpAccountValue || balanceCache.data.accountValue;
+        state.hlBalance = balanceCache.data.accountValue || balanceCache.data.perpAccountValue || 0;
+        state.openTotalUsed = Number(balanceCache.data.openTotalUsed) || 0;
+        state.openSingleUsed = Number(balanceCache.data.openSingleUsed) || 0;
+        state.notionalByPair = balanceCache.data.notionalByPair && typeof balanceCache.data.notionalByPair === 'object'
+            ? balanceCache.data.notionalByPair
+            : {};
         const hlBalanceEl = document.getElementById('hlBalance');
         if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(state.hlBalance);
     }
@@ -54,7 +62,12 @@ async function refreshBalance() {
     try {
         const response = await safeSendMessage({ action: 'fetchBalance', address: state.storedAddress });
 
-        state.hlBalance = response.perpAccountValue || response.accountValue;
+        state.hlBalance = response.accountValue || response.perpAccountValue || 0;
+        state.openTotalUsed = Number(response.openTotalUsed) || 0;
+        state.openSingleUsed = Number(response.openSingleUsed) || 0;
+        state.notionalByPair = response.notionalByPair && typeof response.notionalByPair === 'object'
+            ? response.notionalByPair
+            : {};
         const hlBalanceEl = document.getElementById('hlBalance');
         if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(state.hlBalance);
     } catch (e) {
@@ -139,6 +152,9 @@ function disconnectWallet() {
     chrome.storage.local.remove(['hlAddress', 'lastEventTimestampMs', 'recentEvents']);
     state.storedAddress = null;
     state.traderLimits = null;
+    state.openTotalUsed = 0;
+    state.openSingleUsed = 0;
+    state.notionalByPair = {};
     if (state.refreshIntervalId) {
         clearInterval(state.refreshIntervalId);
         state.refreshIntervalId = null;
@@ -163,6 +179,7 @@ function disconnectWallet() {
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('Hyperfunded extension loaded');
     initExplainers();
+    initEventsPagination();
 
     const addressInput = document.getElementById('walletAddress');
     const saveBtn = document.getElementById('walletSave');
@@ -255,14 +272,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         analyticsLink.addEventListener('click', function(e) {
             e.preventDefault();
             chrome.tabs.create({ url: 'https://hyperscaled.trade/dashboard' });
-        });
-    }
-
-    const viewLink = document.querySelector('.view-link');
-    if (viewLink) {
-        viewLink.addEventListener('click', function(e) {
-            e.preventDefault();
-            chrome.tabs.create({ url: getHlAppUrl() });
         });
     }
 

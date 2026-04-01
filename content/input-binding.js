@@ -33,12 +33,21 @@
         HF.tradeGate.releaseForcedTradeBlock();
         scheduleUpdate();
         clearTimeout(clampDebounceTimer);
-        clampDebounceTimer = setTimeout(() => HF.clamping.clampInputIfNeeded(input), 400);
+        if (HF.utils.isLikelySizeInput(input)) {
+          clampDebounceTimer = setTimeout(() => HF.clamping.clampInputIfNeeded(input), 400);
+        }
       }, opts);
       input.addEventListener("keydown", () => { HF.state.lastEditedInput = input; scheduleUpdate(); }, opts);
       input.addEventListener("keyup", () => { HF.state.lastEditedInput = input; scheduleUpdate(); }, opts);
-      input.addEventListener("change", () => { HF.state.lastEditedInput = input; HF.clamping.clampInputIfNeeded(input); scheduleUpdate(); }, opts);
-      input.addEventListener("blur", () => { clearTimeout(clampDebounceTimer); HF.clamping.clampInputIfNeeded(input); }, opts);
+      input.addEventListener("change", () => {
+        HF.state.lastEditedInput = input;
+        if (HF.utils.isLikelySizeInput(input)) HF.clamping.clampInputIfNeeded(input);
+        scheduleUpdate();
+      }, opts);
+      input.addEventListener("blur", () => {
+        clearTimeout(clampDebounceTimer);
+        if (HF.utils.isLikelySizeInput(input)) HF.clamping.clampInputIfNeeded(input);
+      }, opts);
     }
   }
 
