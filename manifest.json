@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hyperscaled",
   "version": "1.0.3",
-  "description": "Track your Hyperfunded account and Hyperliquid positions",
+  "description": "Track your Hyperscaled account and Hyperliquid positions",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -26,7 +26,8 @@
     "https://api.hyperliquid.xyz/*",
     "https://app.hyperliquid-testnet.xyz/trade/*",
     "https://api.hyperliquid-testnet.xyz/*",
-    "http://34.187.154.219:48888/*"
+    "http://34.187.154.219:48888/*",
+    "https://validator.mainnet.vantatrading.io/*"
   ],
   "content_scripts": [
     {

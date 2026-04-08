@@ -177,7 +177,7 @@ function disconnectWallet() {
 // ── Initialization ───────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('Hyperfunded extension loaded');
+    console.log('Hyperscaled extension loaded');
     initExplainers();
     initEventsPagination();
 
