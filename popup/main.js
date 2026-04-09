@@ -33,7 +33,7 @@ async function restoreFromCache() {
     ]);
 
     if (balanceCache?.data) {
-        state.hlBalance = balanceCache.data.accountValue || balanceCache.data.perpAccountValue || 0;
+        state.hlBalance = balanceCache.data.accountValue || 0;
         state.openTotalUsed = Number(balanceCache.data.openTotalUsed) || 0;
         state.openSingleUsed = Number(balanceCache.data.openSingleUsed) || 0;
         state.notionalByPair = balanceCache.data.notionalByPair && typeof balanceCache.data.notionalByPair === 'object'
@@ -62,7 +62,7 @@ async function refreshBalance() {
     try {
         const response = await safeSendMessage({ action: 'fetchBalance', address: state.storedAddress });
 
-        state.hlBalance = response.accountValue || response.perpAccountValue || 0;
+        state.hlBalance = response.accountValue || 0;
         state.openTotalUsed = Number(response.openTotalUsed) || 0;
         state.openSingleUsed = Number(response.openSingleUsed) || 0;
         state.notionalByPair = response.notionalByPair && typeof response.notionalByPair === 'object'
@@ -177,7 +177,7 @@ function disconnectWallet() {
 // ── Initialization ───────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async function() {
-    console.log('Hyperfunded extension loaded');
+    console.log('Hyperscaled extension loaded');
     initExplainers();
     initEventsPagination();
 
@@ -273,6 +273,45 @@ document.addEventListener('DOMContentLoaded', async function() {
             e.preventDefault();
             chrome.tabs.create({ url: 'https://hyperscaled.trade/dashboard' });
         });
+    }
+
+    // Capacity HL/HS toggle
+    const capacityToggle = document.getElementById('capacityToggle');
+    if (capacityToggle) {
+        capacityToggle.addEventListener('click', (e) => {
+            const btn = e.target.closest('.capacity-toggle-btn');
+            if (!btn) return;
+            const view = btn.dataset.view;
+            const hlView = document.getElementById('capacityViewHl');
+            const hsView = document.getElementById('capacityViewHs');
+            capacityToggle.querySelectorAll('.capacity-toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (view === 'hs') {
+                hlView.hidden = true;
+                hsView.hidden = false;
+            } else {
+                hlView.hidden = false;
+                hsView.hidden = true;
+            }
+        });
+    }
+
+    // Pin to side panel
+    const pinSideBtn = document.getElementById('pinSideBtn');
+    if (pinSideBtn && chrome.sidePanel) {
+        pinSideBtn.addEventListener('click', async () => {
+            try {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (tab) {
+                    await chrome.sidePanel.open({ tabId: tab.id });
+                    window.close();
+                }
+            } catch (e) {
+                console.error('[Hyperscaled] Side panel open failed:', e);
+            }
+        });
+    } else if (pinSideBtn) {
+        pinSideBtn.style.display = 'none';
     }
 
     // Restore cached data instantly, then refresh live

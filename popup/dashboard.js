@@ -10,6 +10,14 @@ export function applyValidatorData(result, state) {
     const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
     const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
 
+    const accountSizeData = result.account_size_data;
+    const capUsed = accountSizeData?.capital_used;
+
+    // Leverage-weighted unrealized PnL (matches dashboard calculation)
+    const levSum = openPositions.reduce((s, p) => {
+        return s + Math.abs(parseFloat(p.net_leverage ?? p.leverage) || 0);
+    }, 0);
+
     let totalUnrealizedPnl = 0;
     let totalNotional = 0;
     let maxSingleNotional = 0;
@@ -19,7 +27,18 @@ export function applyValidatorData(result, state) {
         const notional = pos.net_leverage != null
             ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
             : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
-        const pnl = ((parseFloat(pos.current_return) || 1) - 1) * accountSize;
+
+        const r = parseFloat(pos.current_return) || 1;
+        let pnl;
+        if (capUsed != null && capUsed > 0 && levSum > 0) {
+            const lev = Math.abs(parseFloat(pos.net_leverage ?? pos.leverage) || 0);
+            const share = lev / levSum;
+            pnl = (r - 1) * capUsed * share;
+        } else if (capUsed != null && capUsed > 0 && openPositions.length > 0) {
+            pnl = (r - 1) * (capUsed / openPositions.length);
+        } else {
+            pnl = (r - 1) * accountSize;
+        }
 
         totalUnrealizedPnl += pnl;
         totalNotional += notional;
@@ -38,7 +57,7 @@ export function applyValidatorData(result, state) {
     const cp = result.challenge_period || {};
     const dd = result.drawdown || {};
     const currentEquity = parseFloat(dd.current_equity) || 1;
-    const validatorEquity = accountSize * currentEquity;
+    const validatorEquity = result.account_size_data?.balance ?? (accountSize * currentEquity);
     const returnsPct = (currentEquity - 1) * 100;
     const targetPct = CHALLENGE_TARGET;
     const challengeCompletionPct = targetPct > 0 ? Math.min((returnsPct / targetPct) * 100, 100) : 0;
@@ -118,10 +137,27 @@ export function applyValidatorData(result, state) {
             `Trailing ${fmtUsd(Math.max(trailingBufferDollar, 0))} (${trailingBufferPct.toFixed(2)}%) buffer`;
     }
 
+    // ── Mirror ratio (used by HS capacity block) ───────────────────────────────
+    const hlBal = Number(state.hlBalance) || 0;
+    const mirrorRatio = hlBal > 0 ? accountSize / hlBal : 0;
+
+    // ── Trading Capacity ────────────────────────────────────────────────────────
     const perPairLevCap = inChallenge ? 0.625 : 2.5;
     const totalLevCap   = inChallenge ? 1.25  : 5;
-    // Match content-script enforcement basis: live equity + deployed open exposure.
+    // Capacity is calculated from HL balance (not Hyperscaled account size).
     const basisUsd = (Number(state.hlBalance) || 0) + (Number(state.openTotalUsed) || 0);
+
+    // Populate multiplier and basis labels
+    const perAssetMultiplierEl = document.getElementById('perAssetMultiplier');
+    const totalMultiplierEl = document.getElementById('totalMultiplier');
+    const capacityBasisValueEl = document.getElementById('capacityBasisValue');
+    const infoPerAssetMultEl = document.getElementById('infoPerAssetMultiplier');
+    const infoTotalMultEl = document.getElementById('infoTotalMultiplier');
+    if (perAssetMultiplierEl) perAssetMultiplierEl.textContent = `(${perPairLevCap}x HL bal)`;
+    if (totalMultiplierEl) totalMultiplierEl.textContent = `(${totalLevCap}x HL bal)`;
+    if (capacityBasisValueEl) capacityBasisValueEl.textContent = fmtUsd(basisUsd);
+    if (infoPerAssetMultEl) infoPerAssetMultEl.textContent = `${perPairLevCap}x`;
+    if (infoTotalMultEl) infoTotalMultEl.textContent = `${totalLevCap}x`;
 
     let maxPerPair = basisUsd * perPairLevCap;
     let maxTotal   = basisUsd * totalLevCap;
@@ -191,12 +227,70 @@ export function applyValidatorData(result, state) {
     }
     if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalCapacityUsed, 0));
 
-    renderPositions(openPositions, accountSize);
+    // ── Trading Capacity (Hyperscaled) — mirrored proportionally ────────────
+    const r = mirrorRatio;  // accountSize / hlBalance, already computed above
+    const hsMaxPerPair = maxPerPair * r;
+    const hsMaxTotal   = maxTotal * r;
+    const hsLargestPairNotional = largestPairNotional * r;
+    const hsTotalCapacityUsed   = totalCapacityUsed * r;
+
+    const hsBasisRatioEl = document.getElementById('hsBasisRatio');
+    const hsBasisValueEl = document.getElementById('hsBasisValue');
+    if (hsBasisRatioEl) hsBasisRatioEl.textContent = r > 0 ? r.toFixed(1) + 'x' : '--';
+    if (hsBasisValueEl) hsBasisValueEl.textContent = fmtUsd(accountSize);
+
+    const hsPerPairRemainingEl = document.getElementById('hsPerPairRemaining');
+    if (hsPerPairRemainingEl) hsPerPairRemainingEl.textContent = fmtUsd(Math.max(hsMaxPerPair - hsLargestPairNotional, 0));
+
+    const hsPerPairSubBarsEl = document.getElementById('hsPerPairSubBars');
+    if (hsPerPairSubBarsEl) {
+        if (perAssetEntries.length === 0) {
+            hsPerPairSubBarsEl.innerHTML = '';
+        } else {
+            hsPerPairSubBarsEl.innerHTML = perAssetEntries.map(([symbol, value]) => {
+                const hsValue = value * r;
+                const usedPct = hsMaxPerPair > 0 ? Math.min((hsValue / hsMaxPerPair) * 100, 100) : 0;
+                const safeSymbol = symbol.replace(/[^A-Z0-9._-]/g, '');
+                return `
+                    <div class="capacity-asset-row">
+                        <span class="capacity-asset-symbol">${safeSymbol}</span>
+                        <div class="capacity-asset-track">
+                            <div class="capacity-asset-fill" style="width: ${usedPct.toFixed(1)}%;"></div>
+                        </div>
+                        <span class="capacity-asset-value">${fmtUsd(hsValue)} / ${fmtUsd(hsMaxPerPair)}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
+
+    const hsPerPairBreakdownEl = document.getElementById('hsPerPairBreakdown');
+    if (hsPerPairBreakdownEl) {
+        if (perAssetEntries.length === 0) {
+            hsPerPairBreakdownEl.textContent = 'No open positions';
+        } else {
+            hsPerPairBreakdownEl.textContent = `${perAssetEntries.length} asset${perAssetEntries.length > 1 ? 's' : ''} with open exposure`;
+        }
+    }
+
+    const hsCapacityUsedEl = document.getElementById('hsCapacityUsed');
+    const hsCapacityMaxEl = document.getElementById('hsCapacityMax');
+    const hsCapacityFillEl = document.getElementById('hsCapacityFill');
+    const hsCapacityRemainingEl = document.getElementById('hsCapacityRemaining');
+    if (hsCapacityUsedEl) hsCapacityUsedEl.textContent = fmtUsd(hsTotalCapacityUsed);
+    if (hsCapacityMaxEl) hsCapacityMaxEl.textContent = fmtUsd(hsMaxTotal);
+    if (hsCapacityFillEl) {
+        const hsPct = hsMaxTotal > 0 ? Math.min((hsTotalCapacityUsed / hsMaxTotal) * 100, 100) : 0;
+        hsCapacityFillEl.style.width = hsPct + '%';
+    }
+    if (hsCapacityRemainingEl) hsCapacityRemainingEl.textContent = fmtUsd(Math.max(hsMaxTotal - hsTotalCapacityUsed, 0));
+
+    renderPositions(openPositions, accountSize, accountSizeData);
     showDashboard();
     state.dashboardShown = true;
 }
 
-export function renderPositions(positions, accountSize) {
+export function renderPositions(positions, accountSize, accountSizeData) {
     const container = document.getElementById('positionsContainer');
     if (!container) return;
 
@@ -204,6 +298,9 @@ export function renderPositions(positions, accountSize) {
         container.innerHTML = '<div class="no-more-positions">No open positions</div>';
         return;
     }
+
+    const capUsedRender = accountSizeData?.capital_used;
+    const levSumRender = positions.reduce((s, p) => s + Math.abs(parseFloat(p.net_leverage ?? p.leverage) || 0), 0);
 
     container.innerHTML = positions.map(pos => {
         const tp = pos.trade_pair || '';
@@ -214,7 +311,7 @@ export function renderPositions(positions, accountSize) {
         const isLong = !isNaN(netLev) ? netLev > 0 : (pos.position_type === 'LONG');
         const direction = isLong ? 'LONG' : 'SHORT';
         const badgeClass = isLong ? 'long' : 'short';
-        const leverage = !isNaN(netLev) && netLev !== 0 ? Math.abs(netLev).toFixed(2) + 'x' : '--';
+        const exposure = !isNaN(netLev) && netLev !== 0 ? (Math.abs(netLev) * 100).toFixed(1) + '%' : '--';
 
         const value = !isNaN(netLev)
             ? Math.abs(netLev) * (accountSize || 0)
@@ -222,7 +319,17 @@ export function renderPositions(positions, accountSize) {
 
         const entryPx = parseFloat(pos.average_entry_price) || 0;
 
-        const pnl = ((parseFloat(pos.current_return) || 1) - 1) * (accountSize || 0);
+        const r = parseFloat(pos.current_return) || 1;
+        let pnl;
+        if (capUsedRender != null && capUsedRender > 0 && levSumRender > 0) {
+            const lev = Math.abs(parseFloat(pos.net_leverage ?? pos.leverage) || 0);
+            const share = lev / levSumRender;
+            pnl = (r - 1) * capUsedRender * share;
+        } else if (capUsedRender != null && capUsedRender > 0 && positions.length > 0) {
+            pnl = (r - 1) * (capUsedRender / positions.length);
+        } else {
+            pnl = (r - 1) * (accountSize || 0);
+        }
         const pnlSign = pnl >= 0 ? '+' : '';
         const pnlClass = pnl >= 0 ? 'positive' : 'negative';
 
@@ -245,8 +352,8 @@ export function renderPositions(positions, accountSize) {
                         <span class="detail-value">${fmtUsd(entryPx)}</span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label">Leverage</span>
-                        <span class="detail-value">${leverage}</span>
+                        <span class="detail-label">Exposure</span>
+                        <span class="detail-value">${exposure}</span>
                     </div>
                     ${pos.total_fees > 0 ? `
                     <div class="detail-row">
