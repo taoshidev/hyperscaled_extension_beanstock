@@ -54,7 +54,7 @@
     if (isSymbolSupported(symbol) || symbol === dismissedSymbol) {
       removeUnsupportedOverlay();
     } else {
-      showUnsupportedOverlay(symbol);
+      HF.toast.showUnsupportedPairToast(symbol);
     }
   }
 
