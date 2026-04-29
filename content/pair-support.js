@@ -53,8 +53,12 @@
 
     if (isSymbolSupported(symbol) || symbol === dismissedSymbol) {
       removeUnsupportedOverlay();
+      if (HF.state.forcedTradeBlockReason === "unsupported-pair") {
+        HF.tradeGate.releaseForcedTradeBlock();
+      }
     } else {
       HF.toast.showUnsupportedPairToast(symbol);
+      HF.tradeGate.forceBlockTrade("unsupported-pair");
     }
   }
 
