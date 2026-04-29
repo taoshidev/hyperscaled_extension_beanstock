@@ -1,4 +1,4 @@
-export const VALIDATOR_URL = 'https://validator.mainnet.vantatrading.io';
+export const VALIDATOR_URL = 'https://validator.testnet.vantatrading.io'; // testnet — revert to mainnet before merging
 export const EVENT_POLL_INTERVAL_MINUTES = 1;
 
 export const FAKE_MONEY = false;

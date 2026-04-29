@@ -50,6 +50,7 @@
     forcedTradeBlock: false,
     forcedTradeBlockReason: null,
     lastEditedInput: null,
+    pendingNotional: 0,
     BANNER_ID: "hf-banner",
     LAYOUT_STYLE_ID: "hf-layout-fix",
     BANNER_HEIGHT: 38,
