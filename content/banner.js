@@ -187,6 +187,7 @@
           <span class="hf-target-suffix">/ ${targetMax}%</span>
         </div>
         <span class="hf-divider"></span>
+        <a href="https://www.hyperscaled.trade/rules" target="_blank" class="hf-rules-link">Rules</a>
         <span class="hf-spacer"></span>
       </div>
     `;
