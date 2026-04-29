@@ -119,6 +119,11 @@
       return;
     }
 
+    if (HF.state._unsupportedPairBlocked) {
+      hideMirrorPreview();
+      return;
+    }
+
     const v = HF.utils.parseNumber(input.value);
     if (v <= 0) {
       hideMirrorPreview();
