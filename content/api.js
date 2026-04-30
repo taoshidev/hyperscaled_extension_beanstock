@@ -112,7 +112,7 @@
     try {
       const result = await sendToBackground({ action: "fetchTradePairs" });
 
-      const pairs = (result.allowed_trade_pairs || []).filter(p => p.trade_pair_source === "hyperliquid");
+      const pairs = (result.allowed || result.allowed_trade_pairs || []).filter(p => p.trade_pair_source === "hyperliquid");
       if (pairs.length > 0) {
         HF.state.SUPPORTED_SYMBOLS = pairs.map(p => p.trade_pair_id.replace(/USD[CT]?0?$/, "").toUpperCase());
         console.log("[Hyperscaled] Loaded", HF.state.SUPPORTED_SYMBOLS.length, "HL-supported symbols from validator");
