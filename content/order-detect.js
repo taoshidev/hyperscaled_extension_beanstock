@@ -29,6 +29,11 @@
   function onOrderSubmitted() {
     clearSizeInput();
 
+    // Refresh immediately so the new pending order shows up in notionalByPair
+    // before the user can type a second order. Without this, the 2s interval
+    // below leaves a window where ACCOUNT.notionalByPair is stale.
+    HF.api.checkBalance();
+
     if (refreshTimer) clearInterval(refreshTimer);
     let ticks = 0;
     refreshTimer = setInterval(() => {

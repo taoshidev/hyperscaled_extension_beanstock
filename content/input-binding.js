@@ -15,6 +15,14 @@
     }, 0);
   }
 
+  function isLikelyPriceInput(input) {
+    if (!(input instanceof HTMLInputElement)) return false;
+    const hint = (
+      (input.placeholder || '') + ' ' + (input.getAttribute('aria-label') || '')
+    ).toLowerCase();
+    return hint.includes('price') || hint.includes('limit');
+  }
+
   function bindInputsOnce() {
     const inputs = [...document.querySelectorAll("input")].filter(
       (i) => i.offsetParent !== null && !i.disabled
@@ -40,6 +48,10 @@
         if (HF.utils.isLikelySizeInput(input)) {
           clampDebounceTimer = setTimeout(() => HF.clamping.clampInputIfNeeded(input), 400);
           HF.mirrorPreview.onSizeInputChange(input);
+        } else if (isLikelyPriceInput(input)) {
+          // Limit price changed — re-check cap so block state reflects size × limit_price
+          // rather than waiting for the 500ms polling interval.
+          clampDebounceTimer = setTimeout(() => HF.clamping.checkAndClampOrderValue(), 200);
         }
       }, opts);
       input.addEventListener("keydown", () => { HF.state.lastEditedInput = input; scheduleUpdate(); }, opts);
@@ -49,12 +61,15 @@
         if (HF.utils.isLikelySizeInput(input)) {
           HF.clamping.clampInputIfNeeded(input);
           HF.mirrorPreview.onSizeInputChange(input);
+        } else if (isLikelyPriceInput(input)) {
+          HF.clamping.checkAndClampOrderValue();
         }
         scheduleUpdate();
       }, opts);
       input.addEventListener("blur", () => {
         clearTimeout(clampDebounceTimer);
         if (HF.utils.isLikelySizeInput(input)) HF.clamping.clampInputIfNeeded(input);
+        else if (isLikelyPriceInput(input)) HF.clamping.checkAndClampOrderValue();
         HF.mirrorPreview.onSizeInputBlur(input);
       }, opts);
     }

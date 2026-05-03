@@ -239,6 +239,29 @@ function extractExposureFromAssetPositions(perpsData) {
   };
 }
 
+// Compute pending notional from open (unfilled) limit orders.
+// Only buy-side non-TP/SL non-trigger orders are counted — these represent
+// positions that will be opened when price reaches the limit, so they count
+// against the per-pair cap the same way filled positions do.
+// Sell-side orders are excluded: they reduce (or short) exposure and the cap
+// math handles those directions correctly through signedNotionalByPair.
+function extractPendingBuyNotional(openOrders) {
+  const pending = {};
+  for (const order of (Array.isArray(openOrders) ? openOrders : [])) {
+    if (order.isPositionTpsl) continue;
+    if (order.isTrigger) continue;
+    if (order.side !== 'B') continue;
+    const sz = parseFloat(order.sz || 0) || 0;
+    const px = parseFloat(order.limitPx || 0) || 0;
+    if (sz <= 0 || px <= 0) continue;
+    const symbol = normalizePerpSymbol(order.coin);
+    if (symbol) {
+      pending[symbol] = (pending[symbol] || 0) + sz * px;
+    }
+  }
+  return pending;
+}
+
 function toNum(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
@@ -278,7 +301,7 @@ function readSpotUsdValue(balance, mids) {
 export async function fetchHLBalance(address) {
   console.log('[Hyperscaled BG] fetchHLBalance called for', address);
 
-  const [perpsRes, xyzPerpsRes, spotRes, midsRes] = await Promise.all([
+  const [perpsRes, xyzPerpsRes, spotRes, midsRes, openOrdersRes, xyzOpenOrdersRes] = await Promise.all([
     fetchWithTimeout(HL_API_URL + '/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -298,6 +321,16 @@ export async function fetchHLBalance(address) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'allMids' })
+    }),
+    fetchWithTimeout(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'openOrders', user: address })
+    }),
+    fetchWithTimeout(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'openOrders', user: address, dex: 'xyz' })
     })
   ]);
 
@@ -375,13 +408,39 @@ export async function fetchHLBalance(address) {
 
   console.log('[Hyperscaled BG] total accountValue:', accountValue);
   const exposure = extractExposureFromAssetPositions(perpsData);
+
+  // Merge pending buy limit orders so back-to-back limit orders on the same
+  // pair are blocked before either fills. Limit orders don't appear in
+  // assetPositions until filled; without this a second $500 order slips through
+  // because notionalByPair shows $0 (no filled position yet).
+  let pendingBuyNotional = {};
+  try {
+    const allOpenOrders = [
+      ...(openOrdersRes.ok ? await openOrdersRes.json() : []),
+      ...(xyzOpenOrdersRes.ok ? await xyzOpenOrdersRes.json() : []),
+    ];
+    pendingBuyNotional = extractPendingBuyNotional(allOpenOrders);
+  } catch (e) {
+    console.warn('[Hyperscaled BG] Open orders fetch failed, pending orders excluded:', e.message);
+  }
+
+  const notionalByPair = { ...exposure.notionalByPair };
+  let pendingTotal = 0;
+  for (const [sym, val] of Object.entries(pendingBuyNotional)) {
+    notionalByPair[sym] = (notionalByPair[sym] || 0) + val;
+    pendingTotal += val;
+  }
+  const openTotalUsed = exposure.openTotalUsed + pendingTotal;
+  const openSingleUsed = Object.values(notionalByPair).reduce((m, v) => Math.max(m, Number(v) || 0), 0);
+
   console.log(
-    '[Hyperscaled BG] HL exposure from assetPositions:',
+    '[Hyperscaled BG] HL exposure (filled + pending):',
     JSON.stringify({
       openPositionCount: exposure.openPositionCount,
-      openTotalUsed: exposure.openTotalUsed,
-      openSingleUsed: exposure.openSingleUsed,
-      notionalByPair: exposure.notionalByPair,
+      openTotalUsed,
+      openSingleUsed,
+      notionalByPair,
+      pendingBuyNotional,
     })
   );
 
@@ -394,9 +453,9 @@ export async function fetchHLBalance(address) {
     spotValueByCoin,
     totalMarginUsed: (parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0) + xyzMarginUsed,
     totalNtlPos: (parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0) + xyzNtlPos,
-    openTotalUsed: exposure.openTotalUsed,
-    openSingleUsed: exposure.openSingleUsed,
-    notionalByPair: exposure.notionalByPair,
+    openTotalUsed,
+    openSingleUsed,
+    notionalByPair,
     signedNotionalByPair: exposure.signedNotionalByPair,
     openPositionCount: exposure.openPositionCount,
     exposureSource: 'hyperliquid-assetPositions',

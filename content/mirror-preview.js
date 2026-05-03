@@ -130,9 +130,11 @@
       return;
     }
 
-    // Notional fallback chain
-    let notional = HF.utils.inputToNotional(v);
-    if (notional <= 0) notional = HF.utils.readOrderValueFromDOM();
+    // Notional fallback chain — prefer the DOM "Order Value" (HL renders size × limit_price
+    // there, so it's correct for both market and limit orders). inputToNotional uses mid
+    // price which is wrong for limit orders priced away from mid.
+    let notional = HF.utils.readOrderValueFromDOM();
+    if (notional <= 0) notional = HF.utils.inputToNotional(v);
     if (notional <= 0) {
       const unit = HF.utils.getSizeUnit();
       if (unit === 'USD' || unit === 'USDC') notional = v;
