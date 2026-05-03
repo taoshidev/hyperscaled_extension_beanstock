@@ -303,10 +303,13 @@ export async function fetchHLBalance(address) {
 
   if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
   const perpsData = await perpsRes.json();
-  // Merge xyz DEX positions so xyz pairs (BRENTOIL, GOLD, WTIOIL, etc.) are
-  // visible to exposure tracking immediately after a fill, before the validator
-  // catches up. Without this, a second order on the same xyz pair could bypass
-  // the per-pair cap because notionalByPair shows 0 for that pair.
+  // xyz DEX is a separate HL sub-account: USDC moves from the standard account
+  // into xyz when a position is opened. The standard clearinghouseState only
+  // returns standard equity — the xyz portion must be fetched and added
+  // separately, otherwise HL equity is understated and all cap limits are wrong.
+  let xyzAccountValue = 0;
+  let xyzMarginUsed = 0;
+  let xyzNtlPos = 0;
   try {
     if (xyzPerpsRes.ok) {
       const xyzData = await xyzPerpsRes.json();
@@ -314,14 +317,17 @@ export async function fetchHLBalance(address) {
         ...(perpsData.assetPositions || []),
         ...(xyzData.assetPositions || []),
       ];
+      xyzAccountValue = parseFloat(xyzData?.crossMarginSummary?.accountValue ?? 0) || 0;
+      xyzMarginUsed = parseFloat(xyzData?.crossMarginSummary?.totalMarginUsed ?? 0) || 0;
+      xyzNtlPos = parseFloat(xyzData?.marginSummary?.totalNtlPos ?? 0) || 0;
     }
   } catch (e) {
-    console.warn('[Hyperscaled BG] xyz DEX fetch failed, xyz positions excluded from exposure:', e.message);
+    console.warn('[Hyperscaled BG] xyz DEX fetch failed, xyz equity excluded from account value:', e.message);
   }
-  const perpAccountValue = parseFloat(perpsData?.crossMarginSummary?.accountValue ?? 0);
-  const perpMarginUsed = parseFloat(perpsData?.crossMarginSummary?.totalMarginUsed ?? 0);
+  const perpAccountValue = (parseFloat(perpsData?.crossMarginSummary?.accountValue ?? 0) || 0) + xyzAccountValue;
+  const perpMarginUsed = (parseFloat(perpsData?.crossMarginSummary?.totalMarginUsed ?? 0) || 0) + xyzMarginUsed;
   const perpsWithdrawable = Math.max(0, perpAccountValue - perpMarginUsed);
-  console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, 'perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
+  console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, '(xyz contrib:', xyzAccountValue, ') perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
 
   let spotUSDC = 0;
   let spotAssetsUsd = 0;
@@ -386,8 +392,8 @@ export async function fetchHLBalance(address) {
     spotUSDC,
     spotAssetsUsd,
     spotValueByCoin,
-    totalMarginUsed: parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0,
-    totalNtlPos: parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0,
+    totalMarginUsed: (parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0) + xyzMarginUsed,
+    totalNtlPos: (parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0) + xyzNtlPos,
     openTotalUsed: exposure.openTotalUsed,
     openSingleUsed: exposure.openSingleUsed,
     notionalByPair: exposure.notionalByPair,
