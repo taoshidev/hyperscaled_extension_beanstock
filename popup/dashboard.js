@@ -13,6 +13,13 @@ export function applyValidatorData(result, state) {
     const accountSizeData = result.account_size_data;
     const capUsed = accountSizeData?.capital_used;
 
+    // Live HS balance (drawdown-adjusted) — base for limits and mirror sizing.
+    // When the validator hasn't returned it we show "--" downstream rather
+    // than fall back to accountSize, which is frozen at the funded amount and
+    // would silently produce wrong limit/PnL numbers after any P&L.
+    const balanceField = parseFloat(accountSizeData?.balance);
+    const accountBalance = Number.isFinite(balanceField) && balanceField > 0 ? balanceField : null;
+
     // Leverage-weighted unrealized PnL (matches dashboard calculation)
     const levSum = openPositions.reduce((s, p) => {
         return s + Math.abs(parseFloat(p.net_leverage ?? p.leverage) || 0);
@@ -78,8 +85,9 @@ export function applyValidatorData(result, state) {
     const fundedChangeEl = document.getElementById('fundedChange');
     if (fundedChangeEl) {
         const sign = totalUnrealizedPnl >= 0 ? '+' : '';
-        const pnlPct = accountSize > 0 ? (totalUnrealizedPnl / accountSize) * 100 : 0;
-        fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${sign}${pnlPct.toFixed(2)}%)`;
+        const pnlPct = accountBalance != null ? (totalUnrealizedPnl / accountBalance) * 100 : null;
+        const pctText = pnlPct == null ? '--' : `${sign}${pnlPct.toFixed(2)}%`;
+        fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${pctText})`;
         const changeParent = fundedChangeEl.closest('.balance-change');
         if (changeParent) {
             changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
@@ -128,18 +136,36 @@ export function applyValidatorData(result, state) {
             trailingDrawdownUsagePct > 80 ? 'var(--red)' : trailingDrawdownUsagePct > 50 ? 'var(--amber)' : '';
     }
     if (drawdownLabelEl) {
+        // The drawdown rules are checked against day-open equity (Rule 1) and
+        // EOD high-water mark (Rule 2), not the starting funded size. The
+        // validator publishes both as ratios on the starting size; multiply
+        // through to get $.
+        const dayOpenRatio = parseFloat(dd.daily_open_equity);
+        const hwmRatio = parseFloat(dd.eod_hwm);
+        const dayOpenUsd = (accountSize > 0 && Number.isFinite(dayOpenRatio) && dayOpenRatio > 0)
+            ? accountSize * dayOpenRatio : null;
+        const hwmUsd = (accountSize > 0 && Number.isFinite(hwmRatio) && hwmRatio > 0)
+            ? accountSize * hwmRatio : null;
         const dailyBufferPct = drawdownLimitPct - drawdownPct;
-        const dailyBufferDollar = accountSize * (dailyBufferPct / 100);
         const trailingBufferPct = trailingDrawdownLimitPct - trailingDrawdownPct;
-        const trailingBufferDollar = accountSize * (trailingBufferPct / 100);
+        const dailyBufferText = dayOpenUsd == null
+            ? '--'
+            : fmtUsd(Math.max(dayOpenUsd * (dailyBufferPct / 100), 0));
+        const trailingBufferText = hwmUsd == null
+            ? '--'
+            : fmtUsd(Math.max(hwmUsd * (trailingBufferPct / 100), 0));
         drawdownLabelEl.textContent =
-            `Daily ${fmtUsd(Math.max(dailyBufferDollar, 0))} (${dailyBufferPct.toFixed(2)}%) · ` +
-            `Trailing ${fmtUsd(Math.max(trailingBufferDollar, 0))} (${trailingBufferPct.toFixed(2)}%) buffer`;
+            `Daily ${dailyBufferText} (${dailyBufferPct.toFixed(2)}%) · ` +
+            `Trailing ${trailingBufferText} (${trailingBufferPct.toFixed(2)}%) buffer`;
     }
 
     // ── Mirror ratio (used by HS capacity block) ───────────────────────────────
+    // Numerator is live HS balance (drawdown-adjusted), not starting size, so
+    // the ratio reflects the trader's current equity rather than what they
+    // originally funded. Falls to 0 when accountBalance is unavailable —
+    // downstream HS-column UI shows "--" via the existing `r > 0` checks.
     const hlBal = Number(state.hlBalance) || 0;
-    const mirrorRatio = hlBal > 0 ? accountSize / hlBal : 0;
+    const mirrorRatio = (hlBal > 0 && accountBalance != null) ? accountBalance / hlBal : 0;
 
     // ── Trading Capacity ────────────────────────────────────────────────────────
     // Capacity comes directly from validator limits when available.
@@ -159,16 +185,21 @@ export function applyValidatorData(result, state) {
     let perPairLevDisplay = '1x';
     let totalLevDisplay   = '1x';
 
-    if (state.traderLimits) {
+    // Validator caps are in HS-USD. Converting them to HL-USD requires
+    // mirrorRatio, which depends on accountBalance. If accountBalance is
+    // missing the conversion would silently treat HS limits as HL limits
+    // (off by ~10x), so leave the HL-row caps at basisUsd and let the HS
+    // column render "--" instead of a wrong number.
+    if (state.traderLimits && mirrorRatio > 0) {
         const backendPair = parseFloat(state.traderLimits.max_position_per_pair_usd) || 0;
         const backendTotal = parseFloat(state.traderLimits.max_portfolio_usd) || 0;
         const backendSize = parseFloat(state.traderLimits.account_size) || accountSize || 1;
         if (backendPair > 0) {
-            maxPerPair = mirrorRatio > 0 ? backendPair / mirrorRatio : backendPair;
+            maxPerPair = backendPair / mirrorRatio;
             perPairLevDisplay = `${(backendPair / backendSize).toFixed(2)}x`;
         }
         if (backendTotal > 0) {
-            maxTotal = mirrorRatio > 0 ? backendTotal / mirrorRatio : backendTotal;
+            maxTotal = backendTotal / mirrorRatio;
             totalLevDisplay = `${(backendTotal / backendSize).toFixed(2)}x`;
         }
     }
@@ -266,7 +297,11 @@ export function applyValidatorData(result, state) {
     if (capacityRemainingEl) capacityRemainingEl.textContent = fmtUsd(Math.max(maxTotal - totalCapacityUsed, 0));
 
     // ── Trading Capacity (Hyperscaled) — mirrored proportionally ────────────
-    const r = mirrorRatio;  // accountSize / hlBalance, already computed above
+    // Every $ figure in this section depends on mirrorRatio. When it is 0
+    // (accountBalance unavailable) we cannot compute honest HS values, so
+    // render "--" rather than a misleading $0.00.
+    const r = mirrorRatio;
+    const hsAvailable = r > 0;
     const hsMaxPerPair = maxPerPair * r;
     const hsMaxTotal   = maxTotal * r;
     const hsLargestPairNotional = largestPairNotional * r;
@@ -274,15 +309,17 @@ export function applyValidatorData(result, state) {
 
     const hsBasisRatioEl = document.getElementById('hsBasisRatio');
     const hsBasisValueEl = document.getElementById('hsBasisValue');
-    if (hsBasisRatioEl) hsBasisRatioEl.textContent = r > 0 ? r.toFixed(1) + 'x' : '--';
-    if (hsBasisValueEl) hsBasisValueEl.textContent = fmtUsd(accountSize);
+    if (hsBasisRatioEl) hsBasisRatioEl.textContent = hsAvailable ? r.toFixed(1) + 'x' : '--';
+    if (hsBasisValueEl) hsBasisValueEl.textContent = accountBalance == null ? '--' : fmtUsd(accountBalance);
 
     const hsPerPairRemainingEl = document.getElementById('hsPerPairRemaining');
-    if (hsPerPairRemainingEl) hsPerPairRemainingEl.textContent = fmtUsd(Math.max(hsMaxPerPair - hsLargestPairNotional, 0));
+    if (hsPerPairRemainingEl) hsPerPairRemainingEl.textContent = hsAvailable
+        ? fmtUsd(Math.max(hsMaxPerPair - hsLargestPairNotional, 0))
+        : '--';
 
     const hsPerPairSubBarsEl = document.getElementById('hsPerPairSubBars');
     if (hsPerPairSubBarsEl) {
-        if (perAssetEntries.length === 0) {
+        if (perAssetEntries.length === 0 || !hsAvailable) {
             hsPerPairSubBarsEl.innerHTML = '';
         } else {
             hsPerPairSubBarsEl.innerHTML = perAssetEntries.map(([symbol, value]) => {
@@ -308,7 +345,9 @@ export function applyValidatorData(result, state) {
 
     const hsPerPairBreakdownEl = document.getElementById('hsPerPairBreakdown');
     if (hsPerPairBreakdownEl) {
-        if (perAssetEntries.length === 0) {
+        if (!hsAvailable) {
+            hsPerPairBreakdownEl.textContent = '--';
+        } else if (perAssetEntries.length === 0) {
             hsPerPairBreakdownEl.textContent = 'No open positions';
         } else {
             hsPerPairBreakdownEl.textContent = `${perAssetEntries.length} asset${perAssetEntries.length > 1 ? 's' : ''} with open exposure`;
@@ -319,17 +358,21 @@ export function applyValidatorData(result, state) {
     const hsCapacityMaxEl = document.getElementById('hsCapacityMax');
     const hsCapacityFillEl = document.getElementById('hsCapacityFill');
     const hsCapacityRemainingEl = document.getElementById('hsCapacityRemaining');
-    const hsTotalOver = hsMaxTotal > 0 && hsTotalCapacityUsed > hsMaxTotal;
-    if (hsCapacityUsedEl) hsCapacityUsedEl.textContent = fmtUsd(hsTotalCapacityUsed);
-    if (hsCapacityMaxEl) hsCapacityMaxEl.textContent = fmtUsd(hsMaxTotal);
+    const hsTotalOver = hsAvailable && hsMaxTotal > 0 && hsTotalCapacityUsed > hsMaxTotal;
+    if (hsCapacityUsedEl) hsCapacityUsedEl.textContent = hsAvailable ? fmtUsd(hsTotalCapacityUsed) : '--';
+    if (hsCapacityMaxEl) hsCapacityMaxEl.textContent = hsAvailable ? fmtUsd(hsMaxTotal) : '--';
     if (hsCapacityFillEl) {
-        const hsPct = hsMaxTotal > 0 ? Math.min((hsTotalCapacityUsed / hsMaxTotal) * 100, 100) : 0;
+        const hsPct = hsAvailable && hsMaxTotal > 0
+            ? Math.min((hsTotalCapacityUsed / hsMaxTotal) * 100, 100)
+            : 0;
         hsCapacityFillEl.style.width = hsPct + '%';
         hsCapacityFillEl.classList.toggle('capacity-fill--over', hsTotalOver);
         const hsTrackEl = hsCapacityFillEl.parentElement;
         if (hsTrackEl) hsTrackEl.classList.toggle('capacity-bar--over', hsTotalOver);
     }
-    if (hsCapacityRemainingEl) hsCapacityRemainingEl.textContent = fmtUsd(Math.max(hsMaxTotal - hsTotalCapacityUsed, 0));
+    if (hsCapacityRemainingEl) hsCapacityRemainingEl.textContent = hsAvailable
+        ? fmtUsd(Math.max(hsMaxTotal - hsTotalCapacityUsed, 0))
+        : '--';
 
     renderPositions(openPositions, accountSize, accountSizeData);
     showDashboard();

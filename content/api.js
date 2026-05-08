@@ -92,14 +92,15 @@
     try {
       const result = await sendToBackground({ action: "fetchTraderLimits", address });
 
-      const fundedSize = parseFloat(result.account_size) || ACCOUNT.fundedSize || 0;
+      const accountBalance = ACCOUNT.accountBalance;
       const hlEq = ACCOUNT.hlEquity || ACCOUNT.hlBalance || 0;
 
       // If balance hasn't loaded yet the scaling ratio would be wrong (1x instead of ~73x),
       // producing inflated limit values ($100k/$200k). Skip and let the next poll retry.
       if (hlEq <= 0) return;
+      if (!(accountBalance > 0)) return;
 
-      const scalingRatio = fundedSize > 0 ? fundedSize / hlEq : 1;
+      const scalingRatio = accountBalance / hlEq;
 
       if (result.max_position_per_pair_usd != null) {
         ACCOUNT.maxPositionPerPair = (parseFloat(result.max_position_per_pair_usd) || 0) / scalingRatio;
@@ -250,6 +251,12 @@
 
       const dd = result.drawdown || {};
       const currentEquity = parseFloat(dd.current_equity) || 1;
+      const balanceField = parseFloat(accountSizeData?.balance);
+      ACCOUNT.accountBalance = Number.isFinite(balanceField) && balanceField > 0 ? balanceField : null;
+      const dailyOpen = parseFloat(dd.daily_open_equity);
+      const eodHwm = parseFloat(dd.eod_hwm);
+      ACCOUNT.dailyOpenRatio = Number.isFinite(dailyOpen) && dailyOpen > 0 ? dailyOpen : null;
+      ACCOUNT.eodHwmRatio = Number.isFinite(eodHwm) && eodHwm > 0 ? eodHwm : null;
       ACCOUNT.validatorEquity = accountSizeData?.balance ?? (ACCOUNT.fundedSize * currentEquity);
       ACCOUNT.challengeCurrent = (currentEquity - 1) * 100;
       ACCOUNT.drawdownCurrent = parseFloat(dd.intraday_drawdown_pct) || 0;
@@ -374,6 +381,9 @@
       ACCOUNT.hlBalance = 0;
       ACCOUNT.hlEquity = 0;
       ACCOUNT.fundedSize = 0;
+      ACCOUNT.accountBalance = null;
+      ACCOUNT.dailyOpenRatio = null;
+      ACCOUNT.eodHwmRatio = null;
       ACCOUNT.challengeCurrent = 0;
       ACCOUNT.drawdownCurrent = 0;
       ACCOUNT.daily_loss_pct = 0;

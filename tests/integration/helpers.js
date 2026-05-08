@@ -179,9 +179,10 @@ export function buildHlCoinToDisplay(tradePairsResponse) {
 
 // ── content/api.js — applyTraderLimits (from fetchTraderLimits) ───────────────
 
-export function applyTraderLimits({ fundedSize, hlEq, max_position_per_pair_usd, max_portfolio_usd }) {
+export function applyTraderLimits({ accountBalance, hlEq, max_position_per_pair_usd, max_portfolio_usd }) {
   if (hlEq <= 0) return null;
-  const scalingRatio = fundedSize > 0 ? fundedSize / hlEq : 1;
+  if (!(accountBalance > 0)) return null;
+  const scalingRatio = accountBalance / hlEq;
   const maxPositionPerPair = max_position_per_pair_usd != null
     ? (parseFloat(max_position_per_pair_usd) || 0) / scalingRatio
     : null;
