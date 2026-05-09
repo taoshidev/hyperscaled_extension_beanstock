@@ -37,6 +37,11 @@
     filledTotal: 0,
     pendingTotal: 0,
     signedNotionalByPair: {},
+    // Aggregate unrealized PnL across all HL open positions (sum of HL's
+    // per-position unrealizedPnl). null until HL clearinghouse has loaded —
+    // downstream displays "--" rather than fabricating a value from the
+    // validator's `net_leverage × account_size`.
+    totalUnrealizedPnl: null,
     inChallenge: false,
     isRegistered: false,
     registrationChecked: false,

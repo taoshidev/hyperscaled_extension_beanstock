@@ -76,6 +76,38 @@ export async function fetchTradePairs() {
   return res.json();
 }
 
+// Cache the list of non-default HL DEX prefixes (e.g. ["xyz"]) so we can fetch
+// clearinghouseState for each one. Mirrors the behavior of PTN's
+// hyperliquid_tracker._hl_non_default_dexes() and the SDK's
+// _get_non_default_dexes(): without this we'd miss perp equity and positions
+// on any HIP-3 dex other than the hardcoded "xyz".
+let _nonDefaultDexCache = null;
+
+async function getNonDefaultDexes() {
+  if (_nonDefaultDexCache !== null) return _nonDefaultDexCache;
+  try {
+    const data = await fetchTradePairs();
+    const pairs = Array.isArray(data) ? data : (data?.allowed || data?.allowed_trade_pairs || []);
+    const dexes = new Set();
+    for (const p of pairs) {
+      const hlCoin = p?.hl_coin;
+      if (typeof hlCoin === 'string' && hlCoin.includes(':')) {
+        const dex = hlCoin.split(':')[0].toLowerCase();
+        if (dex) dexes.add(dex);
+      }
+    }
+    _nonDefaultDexCache = Array.from(dexes).sort();
+    console.log('[Hyperscaled BG] Discovered non-default dexes:', _nonDefaultDexCache);
+    return _nonDefaultDexCache;
+  } catch (e) {
+    // Do NOT cache the empty list on failure — that would silently strand
+    // dex equity/positions until the next extension reload. Return [] for
+    // this call only; the next call retries.
+    console.warn('[Hyperscaled BG] Trade pairs fetch failed, retrying next call:', e.message);
+    return [];
+  }
+}
+
 // ── Trader limits ────────────────────────────────────────────────────────────
 
 export async function fetchTraderLimits(address) {
@@ -201,6 +233,7 @@ function extractExposureFromAssetPositions(perpsData) {
   const perAsset = {};
   const perAssetSigned = {};
   let total = 0;
+  let totalUnrealizedPnl = 0;
   let openCount = 0;
   const assetPositions = Array.isArray(perpsData?.assetPositions) ? perpsData.assetPositions : [];
 
@@ -210,12 +243,20 @@ function extractExposureFromAssetPositions(perpsData) {
 
     if (Math.abs(size) <= 1e-12) continue;
 
+    // True position value = size × current price. HL pre-computes this as
+    // `positionValue`; we fall back to `size × markPx` when it's missing.
+    // Never derive notional from `net_leverage × account_size` — that mixes
+    // an HS-side ratio with a frozen funded amount and only approximates
+    // truth when current equity == account_size and HL/validator are in sync.
     const directNotional =
       parseFloat(pos?.positionValue ?? pos?.notionalValue ?? pos?.usdValue ?? pos?.value ?? row?.positionValue);
     const markPx = parseFloat(pos?.markPx ?? pos?.mark_price ?? pos?.px ?? 0) || 0;
     const fallbackNotional = Math.abs(size * markPx);
     const notional = Math.abs(Number.isFinite(directNotional) ? directNotional : fallbackNotional);
     if (!(notional > 0)) continue;
+
+    const upnl = parseFloat(pos?.unrealizedPnl ?? pos?.unrealized_pnl ?? row?.unrealizedPnl);
+    if (Number.isFinite(upnl)) totalUnrealizedPnl += upnl;
 
     const symbol = normalizePerpSymbol(pos?.coin ?? pos?.asset ?? pos?.name ?? row?.coin ?? row?.asset);
     if (symbol) {
@@ -235,6 +276,7 @@ function extractExposureFromAssetPositions(perpsData) {
     openSingleUsed: maxSingle,
     notionalByPair: perAsset,
     signedNotionalByPair: perAssetSigned,
+    totalUnrealizedPnl,
     openPositionCount: openCount,
   };
 }
@@ -279,15 +321,9 @@ function readSpotUsdValue(balance, mids) {
     return { usd: freeAmount, coin: 'USDC', freeAmount };
   }
 
-  const explicitUsd =
-    toNum(balance?.usdValue) ||
-    toNum(balance?.notionalUsd) ||
-    toNum(balance?.valueUsd) ||
-    toNum(balance?.value_usd);
-  if (explicitUsd > 0) {
-    return { usd: explicitUsd, coin, freeAmount };
-  }
-
+  // Match PTN tracker: non-USDC value = freeAmount × mid price. We do not
+  // read balance.usdValue / .notionalUsd / .valueUsd — those aren't part
+  // of HL's spotClearinghouseState schema.
   const midPx = toNum(mids?.[coin]);
   if (midPx > 0) {
     return { usd: freeAmount * midPx, coin, freeAmount };
@@ -301,66 +337,67 @@ function readSpotUsdValue(balance, mids) {
 export async function fetchHLBalance(address) {
   console.log('[Hyperscaled BG] fetchHLBalance called for', address);
 
-  const [perpsRes, xyzPerpsRes, spotRes, midsRes, openOrdersRes, xyzOpenOrdersRes] = await Promise.all([
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'clearinghouseState', user: address })
-    }),
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'clearinghouseState', user: address, dex: 'xyz' })
-    }),
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'spotClearinghouseState', user: address })
-    }),
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'allMids' })
-    }),
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'openOrders', user: address })
-    }),
-    fetchWithTimeout(HL_API_URL + '/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'openOrders', user: address, dex: 'xyz' })
-    })
+  const nonDefaultDexes = await getNonDefaultDexes();
+  const headers = { 'Content-Type': 'application/json' };
+  const post = (body) => fetchWithTimeout(HL_API_URL + '/info', { method: 'POST', headers, body: JSON.stringify(body) });
+
+  // Fetch native + each non-default dex perp/openOrders in parallel, plus
+  // spot + mids. Order: [native_perp, ...dex_perps, spot, mids,
+  // native_openOrders, ...dex_openOrders].
+  const [perpsRes, ...rest] = await Promise.all([
+    post({ type: 'clearinghouseState', user: address }),
+    ...nonDefaultDexes.map(dex => post({ type: 'clearinghouseState', user: address, dex })),
+    post({ type: 'spotClearinghouseState', user: address }),
+    post({ type: 'allMids' }),
+    post({ type: 'openOrders', user: address }),
+    ...nonDefaultDexes.map(dex => post({ type: 'openOrders', user: address, dex })),
   ]);
+  const dexPerpResponses = rest.slice(0, nonDefaultDexes.length);
+  const spotRes = rest[nonDefaultDexes.length];
+  const midsRes = rest[nonDefaultDexes.length + 1];
+  const nativeOpenOrdersRes = rest[nonDefaultDexes.length + 2];
+  const dexOpenOrdersResponses = rest.slice(nonDefaultDexes.length + 3);
 
   if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
   const perpsData = await perpsRes.json();
-  // xyz DEX is a separate HL sub-account: USDC moves from the standard account
-  // into xyz when a position is opened. The standard clearinghouseState only
-  // returns standard equity — the xyz portion must be fetched and added
-  // separately, otherwise HL equity is understated and all cap limits are wrong.
-  let xyzAccountValue = 0;
-  let xyzMarginUsed = 0;
-  let xyzNtlPos = 0;
-  try {
-    if (xyzPerpsRes.ok) {
-      const xyzData = await xyzPerpsRes.json();
-      perpsData.assetPositions = [
-        ...(perpsData.assetPositions || []),
-        ...(xyzData.assetPositions || []),
-      ];
-      xyzAccountValue = parseFloat(xyzData?.crossMarginSummary?.accountValue ?? 0) || 0;
-      xyzMarginUsed = parseFloat(xyzData?.crossMarginSummary?.totalMarginUsed ?? 0) || 0;
-      xyzNtlPos = parseFloat(xyzData?.marginSummary?.totalNtlPos ?? 0) || 0;
+
+  // Match PTN tracker / SDK: prefer marginSummary (cross + isolated), fall
+  // back to crossMarginSummary. Using only crossMarginSummary understates
+  // accountValue when the trader has any isolated-margin positions.
+  const readMargin = (d) => d?.marginSummary || d?.crossMarginSummary || {};
+  const num = (v) => parseFloat(v ?? 0) || 0;
+
+  // Each non-default HIP-3 dex (e.g. xyz) is a separate HL sub-account: USDC
+  // moves into the dex when a position is opened. Their equity and positions
+  // must be fetched and summed separately or HL totals are understated.
+  let dexAccountValue = 0;
+  let dexMarginUsed = 0;
+  let dexNtlPos = 0;
+  for (let i = 0; i < dexPerpResponses.length; i++) {
+    const dex = nonDefaultDexes[i];
+    const res = dexPerpResponses[i];
+    try {
+      if (res.ok) {
+        const data = await res.json();
+        perpsData.assetPositions = [
+          ...(perpsData.assetPositions || []),
+          ...(data.assetPositions || []),
+        ];
+        const m = readMargin(data);
+        dexAccountValue += num(m.accountValue);
+        dexMarginUsed += num(m.totalMarginUsed);
+        dexNtlPos += num(m.totalNtlPos);
+      }
+    } catch (e) {
+      console.warn(`[Hyperscaled BG] Dex "${dex}" fetch failed, excluded from totals:`, e.message);
     }
-  } catch (e) {
-    console.warn('[Hyperscaled BG] xyz DEX fetch failed, xyz equity excluded from account value:', e.message);
   }
-  const perpAccountValue = (parseFloat(perpsData?.crossMarginSummary?.accountValue ?? 0) || 0) + xyzAccountValue;
-  const perpMarginUsed = (parseFloat(perpsData?.crossMarginSummary?.totalMarginUsed ?? 0) || 0) + xyzMarginUsed;
+  const nativeMargin = readMargin(perpsData);
+  const perpAccountValue = num(nativeMargin.accountValue) + dexAccountValue;
+  const perpMarginUsed = num(nativeMargin.totalMarginUsed) + dexMarginUsed;
+  const perpNtlPos = num(nativeMargin.totalNtlPos) + dexNtlPos;
   const perpsWithdrawable = Math.max(0, perpAccountValue - perpMarginUsed);
-  console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, '(xyz contrib:', xyzAccountValue, ') perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
+  console.log('[Hyperscaled BG] perpAccountValue:', perpAccountValue, '(dex contrib:', dexAccountValue, ') perpMarginUsed:', perpMarginUsed, 'perpAvailable:', perpsWithdrawable);
 
   let spotUSDC = 0;
   let spotAssetsUsd = 0;
@@ -416,10 +453,13 @@ export async function fetchHLBalance(address) {
   // still drive cap-breach toasts.
   let pendingNotionalByPair = {};
   try {
-    const allOpenOrders = [
-      ...(openOrdersRes.ok ? await openOrdersRes.json() : []),
-      ...(xyzOpenOrdersRes.ok ? await xyzOpenOrdersRes.json() : []),
-    ];
+    const allOpenOrders = [];
+    if (nativeOpenOrdersRes.ok) allOpenOrders.push(...await nativeOpenOrdersRes.json());
+    for (const res of dexOpenOrdersResponses) {
+      if (res.ok) {
+        try { allOpenOrders.push(...await res.json()); } catch {}
+      }
+    }
     pendingNotionalByPair = extractPendingBuyNotional(allOpenOrders);
   } catch (e) {
     console.warn('[Hyperscaled BG] Open orders fetch failed, pending orders excluded:', e.message);
@@ -459,8 +499,8 @@ export async function fetchHLBalance(address) {
     spotUSDC,
     spotAssetsUsd,
     spotValueByCoin,
-    totalMarginUsed: (parseFloat(perpsData?.marginSummary?.totalMarginUsed) || 0) + xyzMarginUsed,
-    totalNtlPos: (parseFloat(perpsData?.marginSummary?.totalNtlPos) || 0) + xyzNtlPos,
+    totalMarginUsed: perpMarginUsed,
+    totalNtlPos: perpNtlPos,
     openTotalUsed,
     openSingleUsed,
     notionalByPair,
@@ -469,6 +509,7 @@ export async function fetchHLBalance(address) {
     filledTotal,
     pendingTotal,
     signedNotionalByPair: exposure.signedNotionalByPair,
+    totalUnrealizedPnl: exposure.totalUnrealizedPnl,
     openPositionCount: exposure.openPositionCount,
     exposureSource: 'hyperliquid-assetPositions',
   };

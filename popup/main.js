@@ -1,7 +1,7 @@
 // Popup entry point
 import { fmtUsd, truncateAddress } from './format.js';
 import { safeSendMessage, getCachedData, loadAddress, saveAddress } from './api.js';
-import { applyValidatorData, renderPositions } from './dashboard.js';
+import { applyValidatorData } from './dashboard.js';
 import { refreshEvents, renderEvents, initEventsPagination } from './events.js';
 import { showDashboard, hideDashboard, showUnregistered, hideUnregistered, showEliminated, hideEliminated, setPlaceholders } from './screens.js';
 import { showPositionNotification, setupNotificationClickHandler } from './notifications.js';
@@ -19,6 +19,10 @@ const state = {
     pendingNotionalByPair: {},
     filledTotal: 0,
     pendingTotal: 0,
+    // Sum of HL per-position unrealizedPnl. null until HL clearinghouse
+    // returns — display "--" rather than fabricate from validator's
+    // `net_leverage × account_size`.
+    totalUnrealizedPnl: null,
     refreshIntervalId: null,
     dashboardShown: false,
 };
@@ -49,6 +53,8 @@ async function restoreFromCache() {
             ? balanceCache.data.pendingNotionalByPair : {};
         state.filledTotal = Number(balanceCache.data.filledTotal) || 0;
         state.pendingTotal = Number(balanceCache.data.pendingTotal) || 0;
+        const cachedUpnl = parseFloat(balanceCache.data.totalUnrealizedPnl);
+        state.totalUnrealizedPnl = Number.isFinite(cachedUpnl) ? cachedUpnl : null;
         const hlBalanceEl = document.getElementById('hlBalance');
         if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(state.hlBalance);
     }
@@ -90,6 +96,8 @@ async function refreshBalance() {
             ? response.pendingNotionalByPair : {};
         state.filledTotal = Number(response.filledTotal) || 0;
         state.pendingTotal = Number(response.pendingTotal) || 0;
+        const upnl = parseFloat(response.totalUnrealizedPnl);
+        state.totalUnrealizedPnl = Number.isFinite(upnl) ? upnl : null;
         const hlBalanceEl = document.getElementById('hlBalance');
         if (hlBalanceEl) hlBalanceEl.textContent = fmtUsd(state.hlBalance);
     } catch (e) {
@@ -185,6 +193,7 @@ function disconnectWallet() {
     state.openTotalUsed = 0;
     state.openSingleUsed = 0;
     state.notionalByPair = {};
+    state.totalUnrealizedPnl = null;
     if (state.refreshIntervalId) {
         clearInterval(state.refreshIntervalId);
         state.refreshIntervalId = null;

@@ -6,12 +6,8 @@ const DRAWDOWN_MAX = 5;
 
 export function applyValidatorData(result, state) {
     const accountSize = result.account_size || 0;
-    const positionsRaw = result.positions;
-    const positions = Array.isArray(positionsRaw) ? positionsRaw : (positionsRaw?.positions || []);
-    const openPositions = positions.filter(p => !p.is_closed_position && !p.close_ms);
 
     const accountSizeData = result.account_size_data;
-    const capUsed = accountSizeData?.capital_used;
 
     // Live HS balance (drawdown-adjusted) — base for limits and mirror sizing.
     // When the validator hasn't returned it we show "--" downstream rather
@@ -20,46 +16,15 @@ export function applyValidatorData(result, state) {
     const balanceField = parseFloat(accountSizeData?.balance);
     const accountBalance = Number.isFinite(balanceField) && balanceField > 0 ? balanceField : null;
 
-    // Leverage-weighted unrealized PnL (matches dashboard calculation)
-    const levSum = openPositions.reduce((s, p) => {
-        return s + Math.abs(parseFloat(p.net_leverage ?? p.leverage) || 0);
-    }, 0);
-
-    let totalUnrealizedPnl = 0;
-    let totalNotional = 0;
-    let maxSingleNotional = 0;
-    const validatorNotionalByPair = {};
-
-    for (const pos of openPositions) {
-        const notional = pos.net_leverage != null
-            ? Math.abs(parseFloat(pos.net_leverage)) * accountSize
-            : (pos.filled_orders || []).reduce((s, o) => s + Math.abs(parseFloat(o.value) || 0), 0);
-
-        const r = parseFloat(pos.current_return) || 1;
-        let pnl;
-        if (capUsed != null && capUsed > 0 && levSum > 0) {
-            const lev = Math.abs(parseFloat(pos.net_leverage ?? pos.leverage) || 0);
-            const share = lev / levSum;
-            pnl = (r - 1) * capUsed * share;
-        } else if (capUsed != null && capUsed > 0 && openPositions.length > 0) {
-            pnl = (r - 1) * (capUsed / openPositions.length);
-        } else {
-            pnl = (r - 1) * accountSize;
-        }
-
-        totalUnrealizedPnl += pnl;
-        totalNotional += notional;
-        if (notional > maxSingleNotional) maxSingleNotional = notional;
-
-        const tp = pos.trade_pair || '';
-        const rawSymbol = typeof tp === 'string'
-            ? tp.replace(/\/.*$/, '')
-            : (tp[0] || '');
-        const symbol = rawSymbol.replace(/USD[CT]?$/, '').toUpperCase();
-        if (symbol) {
-            validatorNotionalByPair[symbol] = (validatorNotionalByPair[symbol] || 0) + notional;
-        }
-    }
+    // Total unrealized PnL is sourced from HL's clearinghouseState (sum of
+    // each position's `unrealizedPnl`, plumbed through state.totalUnrealizedPnl).
+    // null until HL has returned — top-of-popup PnL row then shows "--".
+    // We deliberately do NOT derive this from the validator's
+    // `current_return × account_size` — `account_size` is the frozen funded
+    // amount, not the trader's current equity, so any non-trivial P&L makes
+    // the result wrong.
+    const upnlField = parseFloat(state.totalUnrealizedPnl);
+    const totalUnrealizedPnl = Number.isFinite(upnlField) ? upnlField : null;
 
     const cp = result.challenge_period || {};
     const dd = result.drawdown || {};
@@ -84,13 +49,19 @@ export function applyValidatorData(result, state) {
 
     const fundedChangeEl = document.getElementById('fundedChange');
     if (fundedChangeEl) {
-        const sign = totalUnrealizedPnl >= 0 ? '+' : '';
-        const pnlPct = accountBalance != null ? (totalUnrealizedPnl / accountBalance) * 100 : null;
-        const pctText = pnlPct == null ? '--' : `${sign}${pnlPct.toFixed(2)}%`;
-        fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${pctText})`;
-        const changeParent = fundedChangeEl.closest('.balance-change');
-        if (changeParent) {
-            changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
+        if (totalUnrealizedPnl == null) {
+            fundedChangeEl.textContent = '-- (--%)';
+            const changeParent = fundedChangeEl.closest('.balance-change');
+            if (changeParent) changeParent.className = 'balance-change';
+        } else {
+            const sign = totalUnrealizedPnl >= 0 ? '+' : '';
+            const pnlPct = accountBalance != null ? (totalUnrealizedPnl / accountBalance) * 100 : null;
+            const pctText = pnlPct == null ? '--' : `${sign}${pnlPct.toFixed(2)}%`;
+            fundedChangeEl.textContent = `${sign}${fmtUsd(totalUnrealizedPnl)} (${pctText})`;
+            const changeParent = fundedChangeEl.closest('.balance-change');
+            if (changeParent) {
+                changeParent.className = 'balance-change ' + (totalUnrealizedPnl >= 0 ? 'positive' : 'negative');
+            }
         }
     }
 
@@ -185,33 +156,19 @@ export function applyValidatorData(result, state) {
     if (totalMultiplierEl) totalMultiplierEl.textContent = '';
     if (capacityBasisValueEl) capacityBasisValueEl.textContent = fmtUsd(basisUsd);
 
-    const hasHlExposureData = (
-        (Number(state.openTotalUsed) || 0) > 0 ||
-        (Number(state.openSingleUsed) || 0) > 0 ||
-        (state.notionalByPair && Object.keys(state.notionalByPair).length > 0)
-    );
-    // Validator notionals are HS-scale (net_leverage × accountSize). Scale to HL terms
-    // so the HL view reads correctly and the HS view's `× r` produces the right number.
-    // Without this, a fill that shows on the validator before HL's assetPositions catches up
-    // briefly displays HS values in the HL row and HS × r in the HS row.
-    const validatorNotionalByPairHl = {};
-    if (mirrorRatio > 0) {
-        for (const [k, v] of Object.entries(validatorNotionalByPair)) {
-            validatorNotionalByPairHl[k] = v / mirrorRatio;
-        }
-    }
-    const totalNotionalHl = mirrorRatio > 0 ? totalNotional / mirrorRatio : totalNotional;
-    const maxSingleNotionalHl = mirrorRatio > 0 ? maxSingleNotional / mirrorRatio : maxSingleNotional;
-    const largestPairNotional = hasHlExposureData ? (Number(state.openSingleUsed) || 0) : maxSingleNotionalHl;
-    const totalCapacityUsed = hasHlExposureData ? (Number(state.openTotalUsed) || 0) : totalNotionalHl;
-
     // Filled vs pending split (HL units). Filled is the real exposure that
     // drives "over cap" coloring; pending is hypothetical (resting limit
     // orders) and renders as a striped overlay on the same bar.
-    const filledByPairHl  = hasHlExposureData ? (state.filledNotionalByPair  || {}) : validatorNotionalByPairHl;
-    const pendingByPairHl = hasHlExposureData ? (state.pendingNotionalByPair || {}) : {};
-    const filledTotalHl   = hasHlExposureData ? (Number(state.filledTotal)  || 0) : totalNotionalHl;
-    const pendingTotalHl  = hasHlExposureData ? (Number(state.pendingTotal) || 0) : 0;
+    //
+    // All four come from HL clearinghouseState (positionValue per coin /
+    // resting buy orders). When HL hasn't loaded yet they're empty / 0 —
+    // the bars render at 0 width rather than fabricating numbers from the
+    // validator's `net_leverage × account_size`.
+    const filledByPairHl  = state.filledNotionalByPair  || {};
+    const pendingByPairHl = state.pendingNotionalByPair || {};
+    const filledTotalHl   = Number(state.filledTotal)  || 0;
+    const pendingTotalHl  = Number(state.pendingTotal) || 0;
+    const largestPairNotional = Number(state.openSingleUsed) || 0;
 
     const perPairRemainingEl = document.getElementById('perPairRemaining');
     const perPairSubBarsEl = document.getElementById('perPairSubBars');
@@ -419,83 +376,6 @@ export function applyValidatorData(result, state) {
         ? fmtUsd(Math.max(hsMaxTotal - hsFilledTotal - hsPendingTotal, 0))
         : '--';
 
-    renderPositions(openPositions, accountSize, accountSizeData);
     showDashboard();
     state.dashboardShown = true;
-}
-
-export function renderPositions(positions, accountSize, accountSizeData) {
-    const container = document.getElementById('positionsContainer');
-    if (!container) return;
-
-    if (!positions || positions.length === 0) {
-        container.innerHTML = '<div class="no-more-positions">No open positions</div>';
-        return;
-    }
-
-    const capUsedRender = accountSizeData?.capital_used;
-    const levSumRender = positions.reduce((s, p) => s + Math.abs(parseFloat(p.net_leverage ?? p.leverage) || 0), 0);
-
-    container.innerHTML = positions.map(pos => {
-        const tp = pos.trade_pair || '';
-        const displayPair = typeof tp === 'string' ? tp : (tp[1] || tp[0] || 'UNKNOWN');
-        const symbol = typeof tp === 'string' ? tp.replace(/\/.*$/, '') : ((tp[0] || '').replace(/USD[CT]?$/, '') || 'UNKNOWN');
-
-        const netLev = parseFloat(pos.net_leverage);
-        const isLong = !isNaN(netLev) ? netLev > 0 : (pos.position_type === 'LONG');
-        const direction = isLong ? 'LONG' : 'SHORT';
-        const badgeClass = isLong ? 'long' : 'short';
-        const exposure = !isNaN(netLev) && netLev !== 0 ? (Math.abs(netLev) * 100).toFixed(1) + '%' : '--';
-
-        const value = !isNaN(netLev)
-            ? Math.abs(netLev) * (accountSize || 0)
-            : 0;
-
-        const entryPx = parseFloat(pos.average_entry_price) || 0;
-
-        const r = parseFloat(pos.current_return) || 1;
-        let pnl;
-        if (capUsedRender != null && capUsedRender > 0 && levSumRender > 0) {
-            const lev = Math.abs(parseFloat(pos.net_leverage ?? pos.leverage) || 0);
-            const share = lev / levSumRender;
-            pnl = (r - 1) * capUsedRender * share;
-        } else if (capUsedRender != null && capUsedRender > 0 && positions.length > 0) {
-            pnl = (r - 1) * (capUsedRender / positions.length);
-        } else {
-            pnl = (r - 1) * (accountSize || 0);
-        }
-        const pnlSign = pnl >= 0 ? '+' : '';
-        const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-
-        return `
-            <div class="position-card">
-                <div class="position-header">
-                    <div class="position-symbol">
-                        <span class="symbol-name">${displayPair}</span>
-                        <span class="position-badge ${badgeClass}">${direction}</span>
-                    </div>
-                    <div class="position-pnl ${pnlClass}">${pnlSign}${fmtUsd(pnl)}</div>
-                </div>
-                <div class="position-details">
-                    <div class="detail-row">
-                        <span class="detail-label">Value</span>
-                        <span class="detail-value">${fmtUsd(value)}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Entry</span>
-                        <span class="detail-value">${fmtUsd(entryPx)}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Exposure</span>
-                        <span class="detail-value">${exposure}</span>
-                    </div>
-                    ${pos.total_fees > 0 ? `
-                    <div class="detail-row">
-                        <span class="detail-label">Fees</span>
-                        <span class="detail-value negative">-${fmtUsd(pos.total_fees)}</span>
-                    </div>` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
 }
