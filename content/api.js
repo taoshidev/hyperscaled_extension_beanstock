@@ -236,6 +236,13 @@
       // fallback — better to leave them at their initial values (downstream
       // shows "--" / 0) than to display HS-scale numbers labelled HL.
 
+      // HS per-pair position values come pre-computed from background's
+      // fetchValidatorData (strict size × price = sum of signed `q` ×
+      // current HL mid price). Same form for both content and popup
+      // consumers; no local derivation here.
+      ACCOUNT.hsPositionsByCoin = (result.hsPositionsByCoin && typeof result.hsPositionsByCoin === 'object')
+        ? result.hsPositionsByCoin : {};
+
       HF.state.validatorDataLoaded = true;
       HF.banner.updateBannerFromValidator();
       HF.toast?.evaluateOversizeState?.();
@@ -370,6 +377,7 @@
       ACCOUNT.notionalByPair = {};
       ACCOUNT.signedNotionalByPair = {};
       ACCOUNT.totalUnrealizedPnl = null;
+      ACCOUNT.hsPositionsByCoin = {};
       ACCOUNT.inChallenge = false;
       ACCOUNT.isRegistered = false;
       ACCOUNT.registrationChecked = false;

@@ -437,39 +437,56 @@
   // cap (independent of any new order attempt). Stays up until the breach
   // resolves — call evaluateOversizeState() after every ACCOUNT update.
   function computeOverCapInfo() {
-    // Toast triggers on filled exposure only. Pending limit orders show
-    // visually in the popup but don't fire the alarm — they may never fill.
+    // Trigger semantics: toast fires when HL exposure × ratio exceeds the
+    // HS cap (i.e. validator clamped HS to cap). This distinguishes
+    // "intentionally at-cap" (HL fits exactly) from "validator-clamped due
+    // to HL excess" — only the latter warrants a warning.
+    //
+    // Display values: actual capped HS values from the validator (size ×
+    // current price, sourced from ACCOUNT.hsPositionsByCoin). The HL
+    // projection (HL × ratio, the "would-be" if uncapped) is shown in
+    // expanded details so traders can see how much HL needs to reduce.
     const { fmt, effectiveMaxSingleUsd, effectiveMaxTotalUsd, getMirrorMultiplier } = HF.utils;
     const pairMax = effectiveMaxSingleUsd();
     const totalMax = effectiveMaxTotalUsd();
     const mirror = getMirrorMultiplier();
-    const totalUsedHs = (Number(ACCOUNT.filledTotal) || 0) * mirror;
-    const byPair = ACCOUNT.filledNotionalByPair || {};
-    const overAssets = Object.entries(byPair)
-      .map(([sym, v]) => ({ sym: String(sym).toUpperCase(), value: (Number(v) || 0) * mirror }))
-      .filter(({ value }) => pairMax > 0 && value > pairMax)
-      .sort((a, b) => b.value - a.value);
-    const totalOver = totalMax > 0 && totalUsedHs > totalMax;
-    return { fmt, pairMax, totalMax, totalUsedHs, overAssets, totalOver };
+
+    const hsPairs = ACCOUNT.hsPositionsByCoin || {};
+    const hlByPair = ACCOUNT.filledNotionalByPair || {};
+    const hlTotalTarget = (Number(ACCOUNT.filledTotal) || 0) * mirror;
+
+    const overAssets = Object.keys(hlByPair)
+      .map((sym) => {
+        const key = String(sym).toUpperCase();
+        return {
+          sym: key,
+          value: Math.abs(Number(hsPairs[key]?.value || hsPairs[sym]?.value) || 0),
+          hlTarget: (Number(hlByPair[sym]) || 0) * mirror,
+        };
+      })
+      .filter(({ hlTarget }) => pairMax > 0 && hlTarget > pairMax + 0.01)
+      .sort((a, b) => b.hlTarget - a.hlTarget);
+
+    const totalOver = totalMax > 0 && hlTotalTarget > totalMax + 0.01;
+    return { fmt, pairMax, totalMax, overAssets, totalOver, hlTotalTarget };
   }
 
-  function buildOversizeDetailsHtml({ fmt, pairMax, totalMax, overAssets, totalUsedHs, totalOver }) {
+  function buildOversizeDetailsHtml({ fmt, pairMax, totalMax, overAssets, totalOver, hlTotalTarget }) {
     const lines = [];
     if (overAssets.length > 0) {
       const worst = overAssets[0];
       const more = overAssets.length > 1 ? ` (+${overAssets.length - 1} more over cap)` : '';
       lines.push(
-        '<b>' + worst.sym + '</b> HL exposure (current position + open order value) maps to <b>' + fmt(worst.value) +
-        '</b> in HS terms — exceeds the per-pair HS cap of <b>' + fmt(pairMax) + '</b>' + more + '.'
+        '<b>' + worst.sym + '</b> HS pair is at the cap of <b>' + fmt(pairMax) + '</b>' + more + '. ' +
+        'HL exposure projects to <b>' + fmt(worst.hlTarget) + '</b> in HS terms.'
       );
     }
     if (totalOver) {
       lines.push(
-        'Total HL exposure maps to <b>' + fmt(totalUsedHs) +
-        '</b> in HS terms — exceeds the portfolio HS cap of <b>' + fmt(totalMax) + '</b>.'
+        'HS portfolio is at the cap of <b>' + fmt(totalMax) + '</b>. ' +
+        'Total HL exposure projects to <b>' + fmt(hlTotalTarget) + '</b> in HS terms.'
       );
     }
-    lines.push('HS positions will be capped at the limit.');
     lines.push('HL trading is unaffected.');
     lines.push('HS will resume tracking HL once HL exposure drops below the cap.');
     return lines.map(l => '<div class="hf-toast-detail-line">' + l + '</div>').join('');
@@ -477,16 +494,22 @@
 
   function showOversizeToast() {
     const info = computeOverCapInfo();
-    const { fmt, overAssets, pairMax, totalMax, totalUsedHs, totalOver } = info;
+    const { fmt, overAssets, pairMax, totalMax, totalOver, hlTotalTarget } = info;
 
     // Compact one-line summary: worst pair, or portfolio if only that breached.
+    // "HS at cap $X" reports the actual capped state; "(HL +$Y)" surfaces
+    // the magnitude of the HL excess so traders know how much to reduce.
     let summary;
     if (overAssets.length > 0) {
       const w = overAssets[0];
       const extra = overAssets.length > 1 ? ' +' + (overAssets.length - 1) : '';
-      summary = w.sym + ' ' + fmt(w.value) + ' / ' + fmt(pairMax) + extra;
+      const excess = Math.max(0, w.hlTarget - pairMax);
+      const excessSuffix = excess > 0.01 ? ' (HL +' + fmt(excess) + ')' : '';
+      summary = w.sym + ' HS at cap ' + fmt(pairMax) + excessSuffix + extra;
     } else {
-      summary = 'Portfolio ' + fmt(totalUsedHs) + ' / ' + fmt(totalMax);
+      const excess = Math.max(0, hlTotalTarget - totalMax);
+      const excessSuffix = excess > 0.01 ? ' (HL +' + fmt(excess) + ')' : '';
+      summary = 'Portfolio HS at cap ' + fmt(totalMax) + excessSuffix;
     }
 
     const detailsHtml = buildOversizeDetailsHtml(info);
@@ -563,13 +586,15 @@
     const totalMax = effectiveMaxTotalUsd();
     const mirror = getMirrorMultiplier();
     if (!(mirror > 0)) return;
-    // Filled-only check: resting limit orders are hypothetical exposure and
-    // shouldn't fire the breach alarm. Mirror-preview still considers
-    // filled+pending when warning about a brand-new order.
-    const totalUsed = (Number(ACCOUNT.filledTotal) || 0) * mirror;
+    // Trigger by HL exposure × ratio against caps. When HL × ratio > cap,
+    // validator has clamped actual HS to cap — that's the breach worth
+    // warning about. Filled-only (pending limit orders are hypothetical
+    // and may never fill; they're surfaced visually elsewhere). The
+    // small +0.01 tolerance avoids flickering at exact-fit positions.
     const byPair = ACCOUNT.filledNotionalByPair || {};
-    const anyPairOver = pairMax > 0 && Object.values(byPair).some(v => ((Number(v) || 0) * mirror) > pairMax);
-    const totalOver = totalMax > 0 && totalUsed > totalMax;
+    const anyPairOver = pairMax > 0 && Object.values(byPair).some(v => ((Number(v) || 0) * mirror) > pairMax + 0.01);
+    const hlTotalTarget = (Number(ACCOUNT.filledTotal) || 0) * mirror;
+    const totalOver = totalMax > 0 && hlTotalTarget > totalMax + 0.01;
     if (anyPairOver || totalOver) {
       if (oversizeDismissed && !activeOversizeToast) return;
       showOversizeToast();

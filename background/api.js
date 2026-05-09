@@ -77,7 +77,7 @@ export async function fetchTradePairs() {
 }
 
 // Cache the list of non-default HL DEX prefixes (e.g. ["xyz"]) so we can fetch
-// clearinghouseState for each one. Mirrors the behavior of PTN's
+// clearinghouseState for each one. Mirrors the behavior of Vanta's
 // hyperliquid_tracker._hl_non_default_dexes() and the SDK's
 // _get_non_default_dexes(): without this we'd miss perp equity and positions
 // on any HIP-3 dex other than the hardcoded "xyz".
@@ -106,6 +106,86 @@ async function getNonDefaultDexes() {
     console.warn('[Hyperscaled BG] Trade pairs fetch failed, retrying next call:', e.message);
     return [];
   }
+}
+
+// Map friendly coin (validator's `tp` prefix, e.g. "WTIOIL") to the HL
+// coin used in clearinghouse / allMids (e.g. "XYZ:CL"). Native pairs map
+// to themselves (BTC → BTC). Cached on first success; on failure return
+// the empty map for this call only and retry next time.
+let _friendlyToHlCoinCache = null;
+
+async function getFriendlyToHlCoin() {
+  if (_friendlyToHlCoinCache !== null) return _friendlyToHlCoinCache;
+  try {
+    const data = await fetchTradePairs();
+    const pairs = Array.isArray(data) ? data : (data?.allowed || data?.allowed_trade_pairs || []);
+    const map = {};
+    for (const p of pairs) {
+      const tp = p?.trade_pair;
+      let friendly;
+      if (typeof tp === 'string') friendly = tp.split('/')[0].toUpperCase();
+      else if (Array.isArray(tp)) friendly = String(tp[0] || '').toUpperCase();
+      else continue;
+      if (!friendly) continue;
+      const hlCoin = (p?.hl_coin || friendly).toString().toUpperCase();
+      map[friendly] = hlCoin;
+    }
+    _friendlyToHlCoinCache = map;
+    return map;
+  } catch (e) {
+    console.warn('[Hyperscaled BG] Trade pairs fetch failed for coin map, retrying next call:', e.message);
+    return {};
+  }
+}
+
+// Derive per-coin HS position values strictly as size × price:
+//   size  = sum of signed `q` (quantity) across the position's filled
+//           orders (Vanta emits q on every Order.to_dashboard when set;
+//           falls back to v/pr with sign by order_type when q is absent
+//           on a fill).
+//   price = HL mid price for the coin's hl_coin form.
+// Skips closed positions, fills lacking both q and v/pr, pairs without
+// a resolvable price, and dust. Result keyed by uppercase friendly coin
+// (BTC, ETH, WTIOIL, …) — same form as ACCOUNT.filledNotionalByPair.
+function deriveHsPositionsByCoin(positions, midPrices, friendlyToHl) {
+  const out = {};
+  if (!Array.isArray(positions)) return out;
+  for (const pos of positions) {
+    if (!pos || pos.is_closed_position || pos.close_ms) continue;
+    let netQuantity = 0;
+    for (const fill of (pos.filled_orders || [])) {
+      const q = parseFloat(fill?.quantity);
+      if (Number.isFinite(q)) {
+        netQuantity += q;
+        continue;
+      }
+      const v = parseFloat(fill?.value);
+      const pr = parseFloat(fill?.price);
+      if (Number.isFinite(v) && Number.isFinite(pr) && pr > 0) {
+        const sideSign = String(fill?.order_type || '').toUpperCase() === 'LONG' ? 1 : -1;
+        netQuantity += sideSign * (Math.abs(v) / pr);
+      }
+    }
+    if (!Number.isFinite(netQuantity) || Math.abs(netQuantity) < 1e-12) continue;
+
+    const tp = pos.trade_pair || '';
+    const rawSymbol = typeof tp === 'string'
+      ? tp.replace(/\/.*$/, '')
+      : (tp[0] || '');
+    const coin = String(rawSymbol).replace(/USD[CT]?$/, '').toUpperCase();
+    if (!coin) continue;
+
+    // Look up HL mid price: native pairs use the coin directly (BTC),
+    // HIP-3 dex pairs need the hl_coin form (WTIOIL → XYZ:CL).
+    const hlCoinKey = (friendlyToHl && friendlyToHl[coin]) || coin;
+    const price = parseFloat(midPrices?.[hlCoinKey]) || parseFloat(midPrices?.[coin]) || 0;
+    if (!(price > 0)) continue;
+
+    const value = Math.abs(netQuantity) * price;
+    const side = netQuantity > 0 ? 'long' : 'short';
+    out[coin] = { quantity: netQuantity, value, side };
+  }
+  return out;
 }
 
 // ── Trader limits ────────────────────────────────────────────────────────────
@@ -153,6 +233,12 @@ function transformTraderResponse(raw) {
             order_uuid: oid,
             order_type: o.t,
             value: o.v,
+            // Signed per-fill quantity. Validator's Order.to_dashboard emits
+            // `q` whenever quantity is non-null (Vanta order.py:203). Sum across
+            // a position's fills equals Vanta's internal `net_quantity` — the
+            // canonical signed coin count. We use this × current mark price
+            // for a strict size × price position value, never `nl × *`.
+            quantity: o.q,
             execution_type: o.e,
             processed_ms: o.p,
             leverage: o.l,
@@ -203,15 +289,37 @@ function transformTraderResponse(raw) {
 export async function fetchValidatorData(address) {
   const normalizedAddress = address.toLowerCase();
   const cacheKey = `cache_validator_${normalizedAddress}`;
-  const res = await fetchWithTimeout(`${VALIDATOR_URL}/hl-traders/${normalizedAddress}`);
-  if (!res.ok) throw new Error(`Validator API error ${res.status}`);
-  const raw = await res.json();
+
+  // Fetch validator dashboard + HL mid prices in parallel. Mid prices are
+  // needed to derive HS position values as size × price. A failed mid
+  // prices call is non-fatal — hsPositionsByCoin will be empty for that
+  // refresh and downstream UI shows "--" rather than fabricated values.
+  const [valRes, midsRes] = await Promise.all([
+    fetchWithTimeout(`${VALIDATOR_URL}/hl-traders/${normalizedAddress}`),
+    fetchWithTimeout(HL_API_URL + '/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'allMids' })
+    })
+  ]);
+  if (!valRes.ok) throw new Error(`Validator API error ${valRes.status}`);
+  const raw = await valRes.json();
   const result = transformTraderResponse(raw);
 
   if (result.hl_address && result.hl_address.toLowerCase() !== normalizedAddress) {
     console.warn('[Hyperscaled BG] Address mismatch — queried:', normalizedAddress, 'got:', result.hl_address);
     return { status: 'not_registered' };
   }
+
+  let midPrices = {};
+  if (midsRes.ok) {
+    try { midPrices = await midsRes.json(); } catch {}
+  }
+  const friendlyToHl = await getFriendlyToHlCoin();
+  const positionsList = Array.isArray(result.positions)
+    ? result.positions
+    : (result.positions?.positions || []);
+  result.hsPositionsByCoin = deriveHsPositionsByCoin(positionsList, midPrices, friendlyToHl);
 
   setCachedResponse(cacheKey, result);
   return result;
@@ -321,7 +429,7 @@ function readSpotUsdValue(balance, mids) {
     return { usd: freeAmount, coin: 'USDC', freeAmount };
   }
 
-  // Match PTN tracker: non-USDC value = freeAmount × mid price. We do not
+  // Match Vanta tracker: non-USDC value = freeAmount × mid price. We do not
   // read balance.usdValue / .notionalUsd / .valueUsd — those aren't part
   // of HL's spotClearinghouseState schema.
   const midPx = toNum(mids?.[coin]);
@@ -361,7 +469,7 @@ export async function fetchHLBalance(address) {
   if (!perpsRes.ok) throw new Error(`Perps API error ${perpsRes.status}`);
   const perpsData = await perpsRes.json();
 
-  // Match PTN tracker / SDK: prefer marginSummary (cross + isolated), fall
+  // Match Vanta tracker / SDK: prefer marginSummary (cross + isolated), fall
   // back to crossMarginSummary. Using only crossMarginSummary understates
   // accountValue when the trader has any isolated-margin positions.
   const readMargin = (d) => d?.marginSummary || d?.crossMarginSummary || {};

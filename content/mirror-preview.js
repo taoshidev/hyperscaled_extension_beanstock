@@ -163,49 +163,114 @@
 
     const symbol = getCurrentSymbol();
     const side = getActiveOrderSide(input);
-    const isSell = side === 'sell';
-
-    // Per-pair capacity (HS units) — selling reduces exposure, buying adds.
-    // Cap math uses FILLED exposure only. Resting limit orders are visible
-    // in the popup as a striped overlay but don't count here, because HS
-    // validator caps at fill-time, not at order-placement time. Stacking
-    // multiple resting orders that together would exceed cap is allowed —
-    // whichever fills second gets capped on HS arrival.
     const resolvedSymbol = HF.utils.resolveExposureSymbol(symbol);
-    const pairUsedHl = (resolvedSymbol && ACCOUNT.filledNotionalByPair[resolvedSymbol]) || 0;
-    const pairUsed = pairUsedHl * ratio;
-    const pairMax = effectiveMaxSingleUsd();
-    const pairAfter = isSell ? Math.max(pairUsed - hsOrder, 0) : pairUsed + hsOrder;
-    const pairUsedPct = pairMax > 0 ? Math.min((pairUsed / pairMax) * 100, 100) : 0;
-    const pairPendingPct = isSell
-      ? -(pairMax > 0 ? Math.min(((pairUsed - pairAfter) / pairMax) * 100, pairUsedPct) : 0)
-      : (pairMax > 0 ? Math.min((hsOrder / pairMax) * 100, 100 - pairUsedPct) : 0);
-    const pairTotalPct = pairMax > 0 ? Math.min((pairAfter / pairMax) * 100, 100) : 0;
 
-    // Portfolio capacity (HS units) — same filled-only logic.
-    const currentUsedHl = Number(ACCOUNT.filledTotal) || 0;
-    const currentUsed = currentUsedHl * ratio;
+    const pairMax  = effectiveMaxSingleUsd();
     const maxTotal = effectiveMaxTotalUsd();
-    const afterOrder = isSell ? Math.max(currentUsed - hsOrder, 0) : currentUsed + hsOrder;
-    const usedPct = maxTotal > 0 ? Math.min((currentUsed / maxTotal) * 100, 100) : 0;
-    const pendingPct = isSell
-      ? -(maxTotal > 0 ? Math.min(((currentUsed - afterOrder) / maxTotal) * 100, usedPct) : 0)
-      : (maxTotal > 0 ? Math.min((hsOrder / maxTotal) * 100, 100 - usedPct) : 0);
-    const totalPct = maxTotal > 0 ? Math.min((afterOrder / maxTotal) * 100, 100) : 0;
+
+    // ── Branch detection (add | reduce | flip | new) ──────────────────────
+    // Source HL signed exposure (positionValue, signed by szi) for direction
+    // and order-vs-position magnitude. The validator's `nl` is never used.
+    const hlSignedNow = (resolvedSymbol && Number(ACCOUNT.signedNotionalByPair?.[resolvedSymbol])) || 0;
+    const sideSign = side === 'buy' ? 1 : -1;
+    const deltaHl = sideSign * notional;
+    const hlSignedAfter = hlSignedNow + deltaHl;
+    const hlAfterAbs = Math.abs(hlSignedAfter);
+
+    const currentSide = Math.abs(hlSignedNow) < 0.01
+      ? null : (hlSignedNow > 0 ? 'long' : 'short');
+    const flippedSide = hlSignedAfter > 0.01
+      ? 'long' : (hlSignedAfter < -0.01 ? 'short' : null);
+
+    let branch;
+    if (!currentSide) {
+      branch = 'new';
+    } else if ((hlSignedNow > 0) === (deltaHl > 0)) {
+      branch = 'add';
+    } else if (Math.abs(deltaHl) <= Math.abs(hlSignedNow) + 0.01) {
+      branch = 'reduce';
+    } else {
+      branch = 'flip';
+    }
+
+    // ── Source-of-truth current HS values ─────────────────────────────────
+    // Strict size × price from validator (sum of signed `q` × current mid
+    // price). Never derived from net_leverage or HL_pair × ratio.
+    const hsPairs = ACCOUNT.hsPositionsByCoin || {};
+    const hsPairEntry = (resolvedSymbol && hsPairs[resolvedSymbol]) || null;
+    const currentHsPair = hsPairEntry ? Math.abs(Number(hsPairEntry.value) || 0) : 0;
+    const hsTotalNow = Object.values(hsPairs).reduce((s, e) => s + Math.abs(Number(e?.value) || 0), 0);
+
+    // ── Per-branch HS impact ──────────────────────────────────────────────
+    // Caps are deterministic (validator clamps at fill time). For PREDICTING
+    // the after-fill HS state we project: target = HL_after × ratio, then
+    // clamp by pair cap and portfolio cap. Mirrors_to is the net HS movement.
+    let afterHsPair = currentHsPair;
+    let mirrorsTo = 0;
+    let pairCapBinds = false;
+    let portCapBinds = false;
+    let stillOver = false;        // reduce branch: HL after still ≥ pair cap
+
+    if (branch === 'new' || branch === 'add') {
+      const targetHs = hlAfterAbs * ratio;
+      let proposedAfter = targetHs;
+      if (pairMax > 0 && proposedAfter > pairMax + 0.01) {
+        proposedAfter = pairMax;
+        pairCapBinds = true;
+      }
+      let proposed = Math.max(0, proposedAfter - currentHsPair);
+      const portAfter = hsTotalNow + proposed;
+      if (maxTotal > 0 && portAfter > maxTotal + 0.01) {
+        proposed = Math.max(0, proposed - (portAfter - maxTotal));
+        portCapBinds = true;
+      }
+      afterHsPair = currentHsPair + proposed;
+      mirrorsTo = proposed;
+    } else if (branch === 'reduce') {
+      const targetHsAfter = hlAfterAbs * ratio;
+      if (pairMax > 0 && targetHsAfter >= pairMax - 0.01) {
+        // HL after-position still over implied cap → HS doesn't follow.
+        afterHsPair = currentHsPair;
+        mirrorsTo = 0;
+        stillOver = true;
+      } else {
+        afterHsPair = targetHsAfter;
+        mirrorsTo = Math.max(0, currentHsPair - afterHsPair);
+      }
+    } else { // flip
+      const targetNew = hlAfterAbs * ratio;
+      let proposed = targetNew;
+      if (pairMax > 0 && proposed > pairMax + 0.01) {
+        proposed = pairMax;
+        pairCapBinds = true;
+      }
+      const portAfter = hsTotalNow - currentHsPair + proposed;
+      if (maxTotal > 0 && portAfter > maxTotal + 0.01) {
+        proposed = Math.max(0, proposed - (portAfter - maxTotal));
+        portCapBinds = true;
+      }
+      afterHsPair = proposed;
+      // Net HS movement: close existing + open new.
+      mirrorsTo = currentHsPair + proposed;
+    }
+
+    const hsTotalAfter = (branch === 'flip')
+      ? Math.max(0, hsTotalNow - currentHsPair + afterHsPair)
+      : (branch === 'reduce')
+      ? Math.max(0, hsTotalNow - mirrorsTo)
+      : (hsTotalNow + mirrorsTo);
 
     const el = ensurePreviewEl(input);
 
-    // Header
+    // ── Header ────────────────────────────────────────────────────────────
     const symbolEl = el.querySelector('#hf-mp-symbol');
     if (symbolEl) symbolEl.textContent = symbol || '—';
     const modeEl = el.querySelector('#hf-mp-mode');
     if (modeEl) modeEl.textContent = ACCOUNT.inChallenge ? 'Challenge' : 'Funded';
 
-    // HL order value
     const hlVal = el.querySelector('#hf-mp-hl-val');
     if (hlVal) hlVal.textContent = fmt(notional);
 
-    // Mirror row
     const mirrorRow = el.querySelector('#hf-mp-mirror-row');
     if (ratio > 0) {
       if (mirrorRow) mirrorRow.style.display = '';
@@ -217,68 +282,56 @@
       if (mirrorRow) mirrorRow.style.display = 'none';
     }
 
-    // Cap warning — HL goes through unchanged, HS mirror gets capped.
-    // Headroom on each binding cap is computed against the right "used"
-    // total: pair-side vs pairUsed, portfolio-side vs currentUsed (sum
-    // across all pairs). When both bind, the smaller of the two is what
-    // actually mirrors of this order.
-    const reducing = HF.utils.isReduceIntent(symbol, side);
-    const overPair  = !reducing && pairMax  > 0 && pairAfter  > pairMax  + 0.01;
-    const overTotal = !reducing && maxTotal > 0 && afterOrder > maxTotal + 0.01;
+    // ── Cap warning (branch-aware, $-style, no "would be" hypotheticals) ─
     const warningEl = el.querySelector('#hf-mp-warning');
     if (warningEl) {
-      if (overPair || overTotal) {
-        const pairHeadroom  = overPair  ? Math.max(0, pairMax  - pairUsed)    : Infinity;
-        const totalHeadroom = overTotal ? Math.max(0, maxTotal - currentUsed) : Infinity;
-        const cappedHsOrder = Math.max(0, Math.min(pairHeadroom, totalHeadroom));
-        // Floor (not round) to 2 decimals so the displayed value, when typed
-        // back into HL, never overshoots the cap. fmt uses toLocaleString
-        // which rounds — that would push the recommendation $0.01–0.02 over
-        // and re-trigger the warning at the value we just suggested.
-        const cappedHlRaw = ratio > 0 ? cappedHsOrder / ratio : 0;
-        const cappedHlOrder = Math.floor(cappedHlRaw * 100) / 100;
+      const lines = [];
+      const capPhrase = (kind) =>
+        kind === 'both'
+          ? 'the per-pair cap of <b>' + fmt(pairMax) + '</b> and portfolio cap of <b>' + fmt(maxTotal) + '</b>'
+          : kind === 'pair'
+          ? 'the per-pair cap of <b>' + fmt(pairMax) + '</b>'
+          : 'the portfolio cap of <b>' + fmt(maxTotal) + '</b>';
+      const bindKind = (pairCapBinds && portCapBinds) ? 'both' : (pairCapBinds ? 'pair' : 'port');
 
-        const atLimit = cappedHsOrder < 0.01;
-        const pairAtLimit  = overPair  && pairHeadroom  < 0.01;
-        const totalAtLimit = overTotal && totalHeadroom < 0.01;
-
-        const lines = [];
-
-        if (atLimit) {
-          let atCapDesc;
-          if (pairAtLimit && totalAtLimit) {
-            atCapDesc = 'HS pair exposure (cap <b>' + fmt(pairMax) + '</b>) and HS portfolio exposure (cap <b>' + fmt(maxTotal) + '</b>) are at the limit';
-          } else if (pairAtLimit) {
-            atCapDesc = 'HS pair exposure is at the cap (<b>' + fmt(pairMax) + '</b>)';
-          } else {
-            atCapDesc = 'HS portfolio exposure is at the cap (<b>' + fmt(maxTotal) + '</b>)';
-          }
-          lines.push(atCapDesc + '. After this order gets filled, none of it will mirror to HS.');
+      if (stillOver) {
+        lines.push('After this reduction, HL pair would still exceed the cap. HS stays at <b>' + fmt(pairMax) + '</b> — none of this order mirrors until HL drops below the cap.');
+        lines.push('HL trading is unaffected.');
+      } else if ((branch === 'new' || branch === 'add') && (pairCapBinds || portCapBinds)) {
+        if (mirrorsTo < 0.01) {
+          const desc = (bindKind === 'pair')
+            ? 'HS pair is at the cap of <b>' + fmt(pairMax) + '</b>'
+            : (bindKind === 'port')
+            ? 'HS portfolio is at the cap of <b>' + fmt(maxTotal) + '</b>'
+            : 'HS pair and portfolio are at the caps';
+          lines.push(desc + '. None of this order mirrors.');
           lines.push('HL trading is unaffected.');
         } else {
-          let exposureDesc;
-          if (overPair && overTotal) {
-            exposureDesc = 'HS pair exposure would be <b>' + fmt(pairAfter) + '</b> and HS portfolio exposure would be <b>' + fmt(afterOrder) + '</b>';
-          } else if (overPair) {
-            exposureDesc = 'HS pair exposure would be <b>' + fmt(pairAfter) + '</b>';
-          } else {
-            exposureDesc = 'HS portfolio exposure would be <b>' + fmt(afterOrder) + '</b>';
-          }
-          let capPhrase;
-          if (overPair && overTotal) {
-            capPhrase = 'the per-pair cap of <b>' + fmt(pairMax) + '</b> and portfolio cap of <b>' + fmt(maxTotal) + '</b>';
-          } else if (overPair) {
-            capPhrase = 'the per-pair cap of <b>' + fmt(pairMax) + '</b>';
-          } else {
-            capPhrase = 'the portfolio cap of <b>' + fmt(maxTotal) + '</b>';
-          }
-          lines.push('After this order gets filled, ' + exposureDesc + ' — exceeds ' + capPhrase + '.');
-          lines.push('HL trading is unaffected; HS mirrors only <b>' + fmt(cappedHsOrder) + '</b> of this order before capping at the limit.');
-          if (cappedHlOrder > 0) {
-            lines.push('Lower this HL order to <b>' + fmt(cappedHlOrder) + '</b> or less to avoid the HS cap.');
+          lines.push('Order exceeds ' + capPhrase(bindKind) + '. HS will mirror only <b>' + fmt(mirrorsTo) + '</b> before capping at the limit.');
+          lines.push('HL trading is unaffected.');
+          // Suggest a smaller HL order — only when the pair cap (alone)
+          // binds; portfolio-bound headroom depends on other pairs and isn't
+          // a clean "lower this order to X" recommendation.
+          if (pairCapBinds && !portCapBinds && ratio > 0) {
+            const cappedHlRaw = Math.max(0, pairMax - currentHsPair) / ratio;
+            const cappedHl = Math.floor(cappedHlRaw * 100) / 100;
+            if (cappedHl > 0) {
+              lines.push('Lower this HL order to <b>' + fmt(cappedHl) + '</b> or less to mirror fully.');
+            }
           }
         }
+      } else if (branch === 'flip' && (pairCapBinds || portCapBinds)) {
+        const oldS = (currentSide || '').toUpperCase();
+        const newS = (flippedSide || '').toUpperCase();
+        if (afterHsPair < 0.01) {
+          lines.push('This flips your position. HS will close <b>' + fmt(currentHsPair) + ' ' + oldS + '</b>; the new ' + newS + ' is fully blocked by ' + capPhrase(bindKind) + ', so none of the new side mirrors.');
+        } else {
+          lines.push('This flips your position. HS will close <b>' + fmt(currentHsPair) + ' ' + oldS + '</b> and open <b>' + fmt(afterHsPair) + ' ' + newS + '</b>, capped by ' + capPhrase(bindKind) + '.');
+        }
+        lines.push('HL trading is unaffected.');
+      }
 
+      if (lines.length > 0) {
         warningEl.innerHTML =
           '<span class="hf-mp-warning-icon">⚠</span>' +
           '<span class="hf-mp-warning-text">' +
@@ -291,41 +344,146 @@
       }
     }
 
-    // Per-pair capacity
+    // ── Per-pair capacity bar ─────────────────────────────────────────────
+    // Bar length always represents |after| / pairMax (HS actual after fill,
+    // capped). Color from capColor(after%). Side label in the title; flips
+    // get an arrow. Detail line shows transition $-amounts.
     const pairTitle = el.querySelector('#hf-mp-pair-title');
-    if (pairTitle) pairTitle.textContent = 'HS ' + (symbol || 'PAIR') + ' LIMIT';
+    if (pairTitle) {
+      let titleText = 'HS ' + (symbol || 'PAIR') + ' LIMIT';
+      if (branch === 'flip' && currentSide && flippedSide) {
+        titleText += ' · ' + currentSide.toUpperCase() + ' → ' + flippedSide.toUpperCase();
+      } else if (branch === 'reduce' && !flippedSide) {
+        titleText += ' · ' + (currentSide || '').toUpperCase() + ' → flat';
+      } else {
+        const labelSide = flippedSide || currentSide;
+        if (labelSide) titleText += ' · ' + labelSide.toUpperCase();
+      }
+      pairTitle.textContent = titleText;
+    }
+
+    const pairCurrentPct = pairMax > 0 ? Math.min(currentHsPair / pairMax * 100, 100) : 0;
+    const pairAfterPct   = pairMax > 0 ? Math.min(afterHsPair  / pairMax * 100, 100) : 0;
+
     const pairPctEl = el.querySelector('#hf-mp-pair-pct');
     const pairBarCurrent = el.querySelector('#hf-mp-pair-bar-current');
     const pairBarPending = el.querySelector('#hf-mp-pair-bar-pending');
     const pairDetail = el.querySelector('#hf-mp-pair-detail');
 
     if (pairPctEl) {
-      pairPctEl.textContent = pairTotalPct.toFixed(1) + '%';
-      pairPctEl.style.color = isSell ? '#00c6a7' : capColor(pairTotalPct);
+      pairPctEl.textContent = pairAfterPct.toFixed(1) + '%';
+      pairPctEl.style.color = capColor(pairAfterPct);
     }
-    if (pairBarCurrent) pairBarCurrent.style.width = (isSell ? pairTotalPct : pairUsedPct).toFixed(2) + '%';
-    if (pairBarPending) {
-      pairBarPending.style.width = Math.abs(pairPendingPct).toFixed(2) + '%';
-      pairBarPending.style.background = isSell ? 'rgba(0, 198, 167, 0.35)' : barPendingBg(pairTotalPct);
-    }
-    if (pairDetail) pairDetail.textContent = fmt(pairAfter) + ' / ' + fmt(pairMax);
 
-    // Portfolio capacity
+    // Bar layout (flex: solid then overlay, no `left` positioning needed):
+    //   add/new  (going up):   solid = currentPct, overlay = afterPct - currentPct (cap-color)
+    //   reduce   (going down): solid = afterPct,   overlay = currentPct - afterPct (green)
+    //   reduce-stillOver:      solid = currentPct, overlay = 0
+    //   flip:                  solid = afterPct,   overlay = 0   (jumps to new side)
+    let pairSolid, pairOverlay, pairOverlayIsReduction;
+    if (stillOver) {
+      pairSolid = pairCurrentPct; pairOverlay = 0; pairOverlayIsReduction = false;
+    } else if (branch === 'flip') {
+      pairSolid = pairAfterPct;   pairOverlay = 0; pairOverlayIsReduction = false;
+    } else if (branch === 'reduce') {
+      pairSolid = pairAfterPct;
+      pairOverlay = Math.max(0, pairCurrentPct - pairAfterPct);
+      pairOverlayIsReduction = true;
+    } else { // new or add
+      pairSolid = pairCurrentPct;
+      pairOverlay = Math.max(0, pairAfterPct - pairCurrentPct);
+      pairOverlayIsReduction = false;
+    }
+
+    if (pairBarCurrent) pairBarCurrent.style.width = pairSolid.toFixed(2) + '%';
+    if (pairBarPending) {
+      pairBarPending.style.width = pairOverlay.toFixed(2) + '%';
+      pairBarPending.style.background = pairOverlayIsReduction
+        ? 'rgba(0, 198, 167, 0.35)'
+        : barPendingBg(pairAfterPct);
+    }
+
+    if (pairDetail) {
+      const cur = fmt(currentHsPair);
+      const aft = fmt(afterHsPair);
+      const capStr = pairMax > 0 ? ' / ' + fmt(pairMax) : '';
+      const cappedTag = pairCapBinds ? ' (capped)' : '';
+      let text;
+      if (branch === 'flip') {
+        const oldS = (currentSide || '').toUpperCase();
+        const newS = (flippedSide || '').toUpperCase();
+        text = cur + ' ' + oldS + ' → ' + aft + ' ' + newS + cappedTag + capStr;
+      } else if (branch === 'new') {
+        text = aft + cappedTag + capStr;
+      } else if (stillOver) {
+        text = cur + capStr;
+      } else {
+        text = cur + ' → ' + aft + cappedTag + capStr;
+      }
+      pairDetail.textContent = text;
+    }
+
+    // ── Portfolio capacity bar (same logic, against maxTotal) ─────────────
+    const portCurrentPct = maxTotal > 0 ? Math.min(hsTotalNow   / maxTotal * 100, 100) : 0;
+    const portAfterPct   = maxTotal > 0 ? Math.min(hsTotalAfter / maxTotal * 100, 100) : 0;
+
     const capPctEl = el.querySelector('#hf-mp-cap-pct');
     const barCurrent = el.querySelector('#hf-mp-bar-current');
     const barPending = el.querySelector('#hf-mp-bar-pending');
     const capDetail = el.querySelector('#hf-mp-cap-detail');
 
     if (capPctEl) {
-      capPctEl.textContent = totalPct.toFixed(1) + '%';
-      capPctEl.style.color = isSell ? '#00c6a7' : capColor(totalPct);
+      capPctEl.textContent = portAfterPct.toFixed(1) + '%';
+      capPctEl.style.color = capColor(portAfterPct);
     }
-    if (barCurrent) barCurrent.style.width = (isSell ? totalPct : usedPct).toFixed(2) + '%';
+
+    let portSolid, portOverlay, portOverlayIsReduction;
+    if (stillOver) {
+      portSolid = portCurrentPct; portOverlay = 0; portOverlayIsReduction = false;
+    } else if (branch === 'reduce') {
+      portSolid = portAfterPct;
+      portOverlay = Math.max(0, portCurrentPct - portAfterPct);
+      portOverlayIsReduction = true;
+    } else if (branch === 'flip') {
+      // Portfolio can move either direction on flip (close - open net effect).
+      if (portAfterPct >= portCurrentPct) {
+        portSolid = portCurrentPct;
+        portOverlay = portAfterPct - portCurrentPct;
+        portOverlayIsReduction = false;
+      } else {
+        portSolid = portAfterPct;
+        portOverlay = portCurrentPct - portAfterPct;
+        portOverlayIsReduction = true;
+      }
+    } else { // new or add
+      portSolid = portCurrentPct;
+      portOverlay = Math.max(0, portAfterPct - portCurrentPct);
+      portOverlayIsReduction = false;
+    }
+
+    if (barCurrent) barCurrent.style.width = portSolid.toFixed(2) + '%';
     if (barPending) {
-      barPending.style.width = Math.abs(pendingPct).toFixed(2) + '%';
-      barPending.style.background = isSell ? 'rgba(0, 198, 167, 0.35)' : barPendingBg(totalPct);
+      barPending.style.width = portOverlay.toFixed(2) + '%';
+      barPending.style.background = portOverlayIsReduction
+        ? 'rgba(0, 198, 167, 0.35)'
+        : barPendingBg(portAfterPct);
     }
-    if (capDetail) capDetail.textContent = fmt(afterOrder) + ' / ' + fmt(maxTotal);
+
+    if (capDetail) {
+      const cur = fmt(hsTotalNow);
+      const aft = fmt(hsTotalAfter);
+      const capStr = maxTotal > 0 ? ' / ' + fmt(maxTotal) : '';
+      const cappedTag = portCapBinds ? ' (capped)' : '';
+      let text;
+      if (branch === 'new') {
+        text = aft + cappedTag + capStr;
+      } else if (stillOver) {
+        text = cur + capStr;
+      } else {
+        text = cur + ' → ' + aft + cappedTag + capStr;
+      }
+      capDetail.textContent = text;
+    }
 
     // Cache notional for getPendingNotional() — banner / toast still consume it.
     // Cap-based blocking is gone: HL orders pass through, the warning above is

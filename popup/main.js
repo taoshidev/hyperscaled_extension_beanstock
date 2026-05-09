@@ -23,6 +23,11 @@ const state = {
     // returns — display "--" rather than fabricate from validator's
     // `net_leverage × account_size`.
     totalUnrealizedPnl: null,
+    // HS per-coin position values, pre-computed by background as strict
+    // size × price (sum of signed `q` × current HL mid price). Map:
+    // { COIN_UPPER: { quantity, value, side } }. Empty until validator +
+    // mid prices return.
+    hsPositionsByCoin: {},
     refreshIntervalId: null,
     dashboardShown: false,
 };
@@ -194,6 +199,7 @@ function disconnectWallet() {
     state.openSingleUsed = 0;
     state.notionalByPair = {};
     state.totalUnrealizedPnl = null;
+    state.hsPositionsByCoin = {};
     if (state.refreshIntervalId) {
         clearInterval(state.refreshIntervalId);
         state.refreshIntervalId = null;

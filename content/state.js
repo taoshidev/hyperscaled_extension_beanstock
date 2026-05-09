@@ -42,6 +42,16 @@
     // downstream displays "--" rather than fabricating a value from the
     // validator's `net_leverage × account_size`.
     totalUnrealizedPnl: null,
+    // HS-side actual position values, derived strictly as size × price:
+    //   size  = sum of signed `q` (quantity) across the position's filled orders
+    //   price = current HL mid price for the coin
+    // Map: { COIN_UPPER: { quantity, value, side } }
+    //   quantity: signed coin units
+    //   value:    abs(quantity × price), USD
+    //   side:     'long' | 'short'
+    // Populated by fetchValidatorData when both validator positions and
+    // midPrices are available. Empty until then.
+    hsPositionsByCoin: {},
     inChallenge: false,
     isRegistered: false,
     registrationChecked: false,

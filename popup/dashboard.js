@@ -26,6 +26,12 @@ export function applyValidatorData(result, state) {
     const upnlField = parseFloat(state.totalUnrealizedPnl);
     const totalUnrealizedPnl = Number.isFinite(upnlField) ? upnlField : null;
 
+    // HS per-coin position values come pre-computed from background as
+    // strict size × price (sum of signed `q` × current HL mid price).
+    // Used below for the HS row (actual capped values), not HL × ratio.
+    state.hsPositionsByCoin = (result.hsPositionsByCoin && typeof result.hsPositionsByCoin === 'object')
+      ? result.hsPositionsByCoin : {};
+
     const cp = result.challenge_period || {};
     const dd = result.drawdown || {};
     const currentEquity = parseFloat(dd.current_equity) || 1;
@@ -283,9 +289,31 @@ export function applyValidatorData(result, state) {
         if (backendSize > 0 && backendPair > 0)  hsMaxPerPair = (backendPair  / backendSize) * accountBalance;
         if (backendSize > 0 && backendTotal > 0) hsMaxTotal   = (backendTotal / backendSize) * accountBalance;
     }
-    const hsLargestPairNotional = largestPairNotional * r;
-    const hsFilledTotal  = filledTotalHl  * r;
-    const hsPendingTotal = pendingTotalHl * r;
+    // ── HS row per-pair entries: filled from validator (actual size × price,
+    // already capped by validator at fill time), pending projected from HL
+    // resting orders × ratio (since HL pending hasn't filled, validator has
+    // no record of it yet). Union the keysets so a coin that's open on the
+    // validator but momentarily missing on the HL pending list still shows.
+    const hsPositionsMap = state.hsPositionsByCoin || {};
+    const hsPerAssetSyms = new Set([
+        ...Object.keys(hsPositionsMap),
+        ...Object.keys(pendingByPairHl),
+    ]);
+    const hsPerAssetEntries = Array.from(hsPerAssetSyms)
+        .map((sym) => ({
+            sym: String(sym).toUpperCase(),
+            hsFilled: Math.abs(Number(hsPositionsMap[sym]?.value) || 0),
+            hsPending: hsAvailable ? (Number(pendingByPairHl[sym]) || 0) * r : 0,
+        }))
+        .filter(({ hsFilled, hsPending }) => hsFilled + hsPending > 0)
+        .sort((a, b) => (b.hsFilled + b.hsPending) - (a.hsFilled + a.hsPending));
+
+    const hsLargestPairNotional = hsPerAssetEntries.length > 0
+        ? Math.max(...hsPerAssetEntries.map(e => e.hsFilled))
+        : 0;
+    const hsFilledTotal = Object.values(hsPositionsMap).reduce(
+        (s, e) => s + Math.abs(Number(e?.value) || 0), 0);
+    const hsPendingTotal = hsAvailable ? pendingTotalHl * r : 0;
 
     const hsBasisRatioEl = document.getElementById('hsBasisRatio');
     const hsBasisValueEl = document.getElementById('hsBasisValue');
@@ -299,12 +327,10 @@ export function applyValidatorData(result, state) {
 
     const hsPerPairSubBarsEl = document.getElementById('hsPerPairSubBars');
     if (hsPerPairSubBarsEl) {
-        if (perAssetEntries.length === 0 || !hsAvailable) {
+        if (hsPerAssetEntries.length === 0 || !hsAvailable) {
             hsPerPairSubBarsEl.innerHTML = '';
         } else {
-            hsPerPairSubBarsEl.innerHTML = perAssetEntries.map(({ sym, filled, pending }) => {
-                const hsFilled  = filled  * r;
-                const hsPending = pending * r;
+            hsPerPairSubBarsEl.innerHTML = hsPerAssetEntries.map(({ sym, hsFilled, hsPending }) => {
                 const filledPct  = hsMaxPerPair > 0 ? Math.min((hsFilled  / hsMaxPerPair) * 100, 100) : 0;
                 const pendingPct = hsMaxPerPair > 0 ? Math.min((hsPending / hsMaxPerPair) * 100, Math.max(0, 100 - filledPct)) : 0;
                 const safeSymbol = sym.replace(/[^A-Z0-9._-]/g, '');
@@ -331,10 +357,10 @@ export function applyValidatorData(result, state) {
     if (hsPerPairBreakdownEl) {
         if (!hsAvailable) {
             hsPerPairBreakdownEl.textContent = '--';
-        } else if (perAssetEntries.length === 0) {
+        } else if (hsPerAssetEntries.length === 0) {
             hsPerPairBreakdownEl.textContent = 'No open positions';
         } else {
-            hsPerPairBreakdownEl.textContent = `${perAssetEntries.length} asset${perAssetEntries.length > 1 ? 's' : ''} with open exposure`;
+            hsPerPairBreakdownEl.textContent = `${hsPerAssetEntries.length} asset${hsPerAssetEntries.length > 1 ? 's' : ''} with open exposure`;
         }
     }
 
