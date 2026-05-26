@@ -89,6 +89,19 @@ Used exclusively in the Settings notification preferences. A 36×20px pill with 
 
 ---
 
+## Brand Mark
+
+The b+leaf icon is the only brand surface in the chrome of the UI. Icon-only — no wordmark inside the extension itself. The product name is carried by the popup `<title>` and surrounding copy.
+
+| Surface | Height | Opacity |
+|---------|--------|---------|
+| Popup / sidepanel header (`.logo-icon`) | `28px` | `1` |
+| Injected banner on Hyperliquid (`.bt-brand-logo`) | `26px` | `1` |
+
+**Rule:** The mark has its own internal contrast and saturation — render at full opacity. Width is `auto` to preserve the SVG's intrinsic aspect ratio.
+
+---
+
 ## Amber / Caution Surface
 
 Amber (`#ffb900`) signals: approaching a limit, caution, elevated risk. It sits between green (safe) and red (blocked) in the severity scale.

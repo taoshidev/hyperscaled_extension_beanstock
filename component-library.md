@@ -247,6 +247,25 @@ A self-contained section displaying a tracked metric with a title and optional r
 
 ---
 
+## Brand Mark (Header)
+
+The b+leaf icon SVG, used at full opacity. Icon-only — the popup `<title>` carries the product name, so no wordmark needs to render inside the chrome.
+
+```html
+<div class="logo">
+  <img src="images/beanstock-logo.svg" alt="Beanstock Trading" class="logo-icon">
+</div>
+```
+
+| Surface | CSS | Height | Width | Opacity |
+|---------|-----|--------|-------|---------|
+| Popup / sidepanel | `.logo-icon` | `28px` | `auto` | `1` |
+| Injected banner | `#bt-banner .bt-brand-logo` | `26px` | `auto` | `1` |
+
+The banner is one notch smaller because it sits inside a `38px` row alongside dense stat groups; the popup header has more breathing room.
+
+---
+
 ## Wallet Inline (Header)
 
 The wallet address lives in the header once saved — zero screen real estate wasted on setup UI during normal operation. On first run (no address saved), the full `#walletConfig` card is shown below the header.

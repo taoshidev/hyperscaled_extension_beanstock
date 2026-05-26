@@ -104,9 +104,9 @@
 }
 
 #bt-banner .bt-brand-logo {
-  height: 22px !important;
+  height: 26px !important;
   width: auto !important;
-  opacity: 0.9 !important;
+  opacity: 1 !important;
 }
 
 #bt-banner .bt-brand b {
